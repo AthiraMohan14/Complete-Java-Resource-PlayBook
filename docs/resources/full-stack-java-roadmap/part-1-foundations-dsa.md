@@ -157,7 +157,7 @@ Phases 1 and 2 of the [Full Stack Java Developer Roadmap](index.md). Learn the l
 ### 3. Modern Java (8-21) Features (1-2 weeks)
 
 #### Modern Java Features
-- **Java 8:** Lambda expressions, Stream API, Method references, Optional, Date/Time API, Teeing Collectors, Default Methods, Base64 Encoding, Switch Expressions, Hidden Classes, Compact Number Formatting
+- **Java 8:** Lambda expressions, Stream API, Method references, Optional, Date/Time API, Default Methods, Base64 Encoding
 
 **Java Generics**
 - Generic Classes
@@ -181,18 +181,19 @@ Phases 1 and 2 of the [Full Stack Java Developer Roadmap](index.md). Learn the l
 - **Java 9:** Module system, interfaces with private methods
 - **Java 10:** Local variable type inference (var)
 - **Java 11:** HttpClient, String methods (strip, lines, repeat, isBlank)
-- **Java 14:** Records (immutable data carriers), instanceof pattern matching
-- **Java 15:** Sealed classes, text blocks
-- **Java 16:** Records finalized, pattern matching preview
-- **Java 17:** Sealed classes finalized, pattern matching enhanced
-- **Java 21:** Virtual Threads (Project Loom), Record patterns, String templates (preview)
+- **Java 12:** Teeing Collectors, Compact Number Formatting
+- **Java 14:** Switch expressions (final); records and instanceof pattern matching (preview)
+- **Java 15:** Text blocks and hidden classes (final); sealed classes (preview)
+- **Java 16:** Records and instanceof pattern matching finalized
+- **Java 17:** Sealed classes finalized; pattern matching for switch (preview)
+- **Java 21:** Virtual Threads (Project Loom), record patterns, pattern matching for switch (final), string templates (preview)
 - **Java 22–25:** Incremental Enhancements
 
 ---
 
 ## Phase 2: Data Structures & Algorithms
 
-### 3. Core DSA: 250–350 LeetCode Problems (Parallel Track)
+### 4. Core DSA: 250–350 LeetCode Problems (Parallel Track)
 
 Work on this track alongside Phases 1, 3, and 4. Aim for 3–5 problems per week, and review every solution. Ask yourself whether you can explain the time and space complexity.
 

@@ -48,13 +48,233 @@ plugins:
   - search
 
 nav:
-  - Home: index.md
-  - Feedback: feedback.md
-  - Resources:
-      - Overview: resources/index.md
-      - Complete Full Stack Java Developer Roadmap:
-          - Overview: resources/full-stack-java-roadmap/index.md
-          - Part 1 - Foundations, Core Java & DSA: resources/full-stack-java-roadmap/part-1-foundations-dsa.md
-          - Part 2 - Data, JDBC & Spring: resources/full-stack-java-roadmap/part-2-data-spring.md
-          - Part 3 - Production Engineering: resources/full-stack-java-roadmap/part-3-production-engineering.md
-          - Part 4 - System Design, Interview & Projects: resources/full-stack-java-roadmap/part-4-design-interview-projects.md
+- Home: index.md
+- Feedback: feedback.md
+- Learning:
+  - Overview: learning/index.md
+  - Programming Basics:
+    - Overview: learning/01-programming-basics/index.md
+    - Java Overview and Platform: learning/01-programming-basics/java-overview-platform.md
+    - Environment Setup: learning/01-programming-basics/environment-setup.md
+    - Syntax Basics: learning/01-programming-basics/syntax-basics.md
+    - Data Types and Variables: learning/01-programming-basics/data-types-variables.md
+    - Operators and Control Flow: learning/01-programming-basics/operators-control-flow.md
+    - Git, IDEs and Command-Line Tools: learning/01-programming-basics/git-ide-tools.md
+  - Core Language:
+    - Overview: learning/02a-core-language/index.md
+    - Wrappers, Strings and Arrays: learning/02a-core-language/wrappers-strings-arrays.md
+    - Classes, Objects and Encapsulation: learning/02a-core-language/oop-classes-encapsulation.md
+    - Inheritance, Polymorphism and Interfaces: learning/02a-core-language/inheritance-polymorphism-interfaces.md
+    - Enums, Inner Classes and Packages: learning/02a-core-language/enums-inner-classes-packages.md
+    - Exceptions: learning/02a-core-language/exceptions.md
+    - Generics: learning/02a-core-language/generics.md
+  - Collections:
+    - Overview: learning/02b-collections/index.md
+    - Collections Overview: learning/02b-collections/collections-overview.md
+    - Lists: learning/02b-collections/lists.md
+    - Sets and Maps: learning/02b-collections/sets-and-maps.md
+    - Queues and Deques: learning/02b-collections/queues-and-deques.md
+    - 'Ordering: Comparable and Comparator': learning/02b-collections/ordering-comparable-comparator.md
+    - Iterators and Utilities: learning/02b-collections/iterators-and-utilities.md
+  - Concurrency, I/O, and Networking:
+    - Overview: learning/02c-concurrency-io/index.md
+    - Threads Basics: learning/02c-concurrency-io/threads-basics.md
+    - Synchronisation, Volatile, and Deadlock: learning/02c-concurrency-io/synchronisation-volatile.md
+    - Executors, Callable, Future, and CompletableFuture: learning/02c-concurrency-io/executors-futures.md
+    - Locks, Synchronisers, Atomics, and ThreadLocal: learning/02c-concurrency-io/locks-atomics.md
+    - I/O, Files, and Serialisation: learning/02c-concurrency-io/io-files-serialisation.md
+    - Networking in Java: learning/02c-concurrency-io/networking.md
+  - Modern Java (8 to 21):
+    - Overview: learning/03a-modern-java/index.md
+    - 'Java 8: Lambdas and Streams': learning/03a-modern-java/java8-lambdas-streams.md
+    - Optional and Functional Interfaces: learning/03a-modern-java/optional-functional-interfaces.md
+    - Java 9 to 17 Features: learning/03a-modern-java/java9-to-17-features.md
+    - Java 21 Features: learning/03a-modern-java/java21-features.md
+  - JVM Internals:
+    - Overview: learning/03b-jvm-internals/index.md
+    - JVM Architecture and Memory: learning/03b-jvm-internals/jvm-architecture-memory.md
+    - Garbage Collection: learning/03b-jvm-internals/garbage-collection.md
+    - Class Loading: learning/03b-jvm-internals/class-loading.md
+    - JIT Compilation and Performance Tools: learning/03b-jvm-internals/jit-and-performance-tools.md
+  - Tooling & Utilities:
+    - Overview: learning/03c-tooling-utilities/index.md
+    - Java Tools & Utilities: learning/03c-tooling-utilities/java-tools-utilities.md
+    - Date & Time (java.time): learning/03c-tooling-utilities/date-time.md
+  - DSA Foundations:
+    - Overview: learning/04a-dsa-foundations/index.md
+    - Arrays & Strings: learning/04a-dsa-foundations/arrays-strings.md
+    - Linked Lists: learning/04a-dsa-foundations/linked-lists.md
+    - Stacks & Queues: learning/04a-dsa-foundations/stacks-queues.md
+    - Trees: learning/04a-dsa-foundations/trees.md
+  - Advanced DSA:
+    - Overview: learning/04b-dsa-advanced/index.md
+    - Graphs: learning/04b-dsa-advanced/graphs.md
+    - Dynamic Programming: learning/04b-dsa-advanced/dynamic-programming.md
+    - Backtracking and Recursion: learning/04b-dsa-advanced/backtracking-recursion.md
+    - Greedy, Bit Manipulation and Hashing: learning/04b-dsa-advanced/greedy-bit-manipulation-hashing.md
+  - Build Tools and Dependency Management:
+    - Overview: learning/05-build-tools/index.md
+    - Maven: learning/05-build-tools/maven.md
+    - Gradle: learning/05-build-tools/gradle.md
+    - Dependency Management: learning/05-build-tools/dependency-management.md
+  - Databases and SQL:
+    - Overview: learning/06-databases-sql/index.md
+    - SQL Fundamentals: learning/06-databases-sql/sql-fundamentals.md
+    - Intermediate SQL: learning/06-databases-sql/intermediate-sql.md
+    - Advanced SQL and Transactions: learning/06-databases-sql/advanced-sql-transactions.md
+    - Query Optimisation: learning/06-databases-sql/query-optimisation.md
+    - Normalisation and Data Modelling: learning/06-databases-sql/normalisation-modelling.md
+    - Specific Databases: learning/06-databases-sql/specific-databases.md
+  - JDBC and Java Persistence:
+    - Overview: learning/07-jdbc-jpa/index.md
+    - JDBC: learning/07-jdbc-jpa/jdbc.md
+    - JPA and Hibernate: learning/07-jdbc-jpa/jpa-hibernate.md
+    - Spring Data JPA: learning/07-jdbc-jpa/spring-data-jpa.md
+    - DTOs and Mapping: learning/07-jdbc-jpa/dto-mapping.md
+    - Database Migrations: learning/07-jdbc-jpa/database-migrations.md
+  - Spring Core and Fundamentals:
+    - Overview: learning/08-spring-core/index.md
+    - IoC Container and Beans: learning/08-spring-core/ioc-and-beans.md
+    - Dependency Injection: learning/08-spring-core/dependency-injection.md
+    - Stereotypes and Configuration: learning/08-spring-core/stereotypes-and-configuration.md
+    - Aspect-Oriented Programming: learning/08-spring-core/aop.md
+    - Spring MVC: learning/08-spring-core/spring-mvc.md
+    - Transactions in Spring: learning/08-spring-core/transactions.md
+  - Spring Boot:
+    - Overview: learning/09-spring-boot/index.md
+    - Spring Boot Basics and Configuration: learning/09-spring-boot/boot-basics-configuration.md
+    - Building REST APIs with Spring Boot: learning/09-spring-boot/rest-apis.md
+    - Validation in Spring Boot: learning/09-spring-boot/validation.md
+    - Exception Handling in Spring Boot: learning/09-spring-boot/exception-handling.md
+    - Actuator and API Documentation: learning/09-spring-boot/actuator-and-api-docs.md
+    - HTTP Clients and Testing in Spring Boot: learning/09-spring-boot/http-clients-and-testing.md
+  - Security:
+    - Overview: learning/10-security/index.md
+    - 'Spring Security: Filter Chain, Authorisation, and Method Security': learning/10-security/spring-security-authorisation.md
+    - 'Authentication: JWT, OAuth 2.0, and OpenID Connect': learning/10-security/authentication-jwt-oauth.md
+    - Password Security and the OWASP Top 10: learning/10-security/password-security-owasp.md
+    - CORS, CSRF, TLS, and Security Headers: learning/10-security/cors-csrf-tls-headers.md
+    - Secrets Management: learning/10-security/secrets-management.md
+  - Testing:
+    - Overview: learning/11-testing/index.md
+    - Unit Testing with JUnit 5: learning/11-testing/unit-testing-junit.md
+    - Mocking with Mockito: learning/11-testing/mockito.md
+    - Integration Testing: learning/11-testing/integration-testing.md
+    - API Testing and Code Coverage: learning/11-testing/api-testing-and-coverage.md
+  - Caching and Performance:
+    - Overview: learning/12-caching-performance/index.md
+    - Performance Optimisation: learning/12-caching-performance/performance-optimisation.md
+    - Distributed Caching: learning/12-caching-performance/distributed-caching.md
+    - Spring Cache Abstraction and Redis: learning/12-caching-performance/spring-cache-and-redis.md
+  - Messaging and Event-Driven Architecture:
+    - Overview: learning/13-messaging/index.md
+    - Apache Kafka: learning/13-messaging/kafka.md
+    - RabbitMQ: learning/13-messaging/rabbitmq.md
+    - Event-Driven Architecture: learning/13-messaging/event-driven-architecture.md
+  - Microservices:
+    - Overview: learning/14-microservices/index.md
+    - Microservices Fundamentals: learning/14-microservices/microservices-fundamentals.md
+    - Spring Cloud: learning/14-microservices/spring-cloud.md
+    - Resilience Patterns: learning/14-microservices/resilience-patterns.md
+    - Inter-Service Communication: learning/14-microservices/inter-service-communication.md
+    - Distributed Transactions: learning/14-microservices/distributed-transactions.md
+  - Docker and Containerisation:
+    - Overview: learning/15-docker/index.md
+    - Docker Fundamentals: learning/15-docker/docker-fundamentals.md
+    - Containers and Compose: learning/15-docker/containers-and-compose.md
+    - Spring Boot in Containers: learning/15-docker/spring-boot-in-containers.md
+  - Kubernetes and Orchestration:
+    - Overview: learning/16-kubernetes/index.md
+    - Kubernetes Architecture and Objects: learning/16-kubernetes/kubernetes-architecture-objects.md
+    - Config, Storage and Health: learning/16-kubernetes/config-storage-health.md
+    - Networking, Helm and Operators: learning/16-kubernetes/networking-helm-operators.md
+  - CI/CD Pipelines:
+    - Overview: learning/17-cicd/index.md
+    - Git Workflows: learning/17-cicd/git-workflows.md
+    - Continuous Integration: learning/17-cicd/continuous-integration.md
+    - Continuous Deployment and Infrastructure as Code: learning/17-cicd/continuous-deployment-iac.md
+  - Cloud Platforms:
+    - Overview: learning/18-cloud/index.md
+    - Amazon Web Services (AWS): learning/18-cloud/aws.md
+    - Microsoft Azure: learning/18-cloud/azure.md
+    - Google Cloud Platform (GCP): learning/18-cloud/gcp.md
+    - Multi-Cloud Considerations: learning/18-cloud/multi-cloud.md
+  - System Design Fundamentals:
+    - Overview: learning/19-system-design-fundamentals/index.md
+    - Core Concepts: learning/19-system-design-fundamentals/core-concepts.md
+    - High-Level Design: learning/19-system-design-fundamentals/high-level-design.md
+    - Low-Level Design: learning/19-system-design-fundamentals/low-level-design.md
+    - Practice Problems: learning/19-system-design-fundamentals/practice-problems.md
+  - Observability and Monitoring:
+    - Overview: learning/20-observability/index.md
+    - Logging: learning/20-observability/logging.md
+    - Metrics: learning/20-observability/metrics.md
+    - Distributed Tracing: learning/20-observability/distributed-tracing.md
+    - Alerting and Health Checks: learning/20-observability/alerting-health-checks.md
+  - API Design and REST Best Practices:
+    - Overview: learning/21-api-design/index.md
+    - REST Principles and Versioning: learning/21-api-design/rest-principles-versioning.md
+    - Pagination, Errors, and Idempotency: learning/21-api-design/pagination-errors-idempotency.md
+    - 'Alternative Protocols: GraphQL, gRPC, and WebSockets': learning/21-api-design/alternative-protocols.md
+    - API Security: learning/21-api-design/api-security.md
+  - AI Integration:
+    - Overview: learning/22-ai-integration/index.md
+    - LLM Integration: learning/22-ai-integration/llm-integration.md
+    - Retrieval-Augmented Generation and Vector Databases: learning/22-ai-integration/rag-and-vector-databases.md
+    - Spring AI and Use Cases: learning/22-ai-integration/spring-ai-use-cases.md
+  - Additional Specialisations:
+    - Overview: learning/23-specialisations/index.md
+    - Search and Analytics: learning/23-specialisations/search-analytics.md
+    - Advanced Patterns: learning/23-specialisations/advanced-patterns.md
+    - Machine Learning for Backend Engineers: learning/23-specialisations/ml-for-backend-engineers.md
+  - Real-World Projects:
+    - Overview: learning/projects/index.md
+    - Hands-On Project Ladder: learning/projects/hands-on-project-ladder.md
+    - 'Project 1: E-Commerce Platform': learning/projects/ecommerce-platform.md
+    - 'Project 2: Social Media and Feed System': learning/projects/social-feed-system.md
+    - 'Project 3: Multi-Tenant SaaS Application': learning/projects/saas-application.md
+    - Portfolio Requirements: learning/projects/portfolio-requirements.md
+- Interview Questions:
+  - Overview: interview-questions/index.md
+  - Quick Reference: interview-questions/quick-reference.md
+  - Technical Questions:
+    - Overview: interview-questions/technical/index.md
+    - Core Java Questions (Part 1 of 2): interview-questions/technical/core-java-part-1.md
+    - Core Java Questions (Part 2 of 2): interview-questions/technical/core-java-part-2.md
+    - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 1 of 2)': interview-questions/technical/advanced-java-concurrency-part-1.md
+    - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 2 of 2)': interview-questions/technical/advanced-java-concurrency-part-2.md
+    - Spring, Spring Boot, and Security Questions (Part 1 of 2): interview-questions/technical/spring-and-security-part-1.md
+    - Spring, Spring Boot, and Security Questions (Part 2 of 2): interview-questions/technical/spring-and-security-part-2.md
+    - Data and Persistence Questions (Part 1 of 2): interview-questions/technical/data-and-persistence-part-1.md
+    - Data and Persistence Questions (Part 2 of 2): interview-questions/technical/data-and-persistence-part-2.md
+    - Architecture and Distributed Systems Questions: interview-questions/technical/architecture-and-distributed.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 1 of 2): interview-questions/technical/devops-cloud-and-ai-part-1.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 2 of 2): interview-questions/technical/devops-cloud-and-ai-part-2.md
+  - Coding Questions:
+    - Overview: interview-questions/coding/index.md
+    - Arrays and Strings Coding Questions (Part 1 of 2): interview-questions/coding/arrays-strings-part-1.md
+    - Arrays and Strings Coding Questions (Part 2 of 2): interview-questions/coding/arrays-strings-part-2.md
+    - Linked Lists, Stacks, and Trees Coding Questions (Part 1 of 2): interview-questions/coding/linked-lists-trees-part-1.md
+    - Linked Lists, Stacks, and Trees Coding Questions (Part 2 of 2): interview-questions/coding/linked-lists-trees-part-2.md
+    - Graphs, Dynamic Programming, and Backtracking Coding Questions (Part 1 of 3): interview-questions/coding/graphs-dp-part-1.md
+    - Graphs, Dynamic Programming, and Backtracking Coding Questions (Part 2 of 3): interview-questions/coding/graphs-dp-part-2.md
+    - Graphs, Dynamic Programming, and Backtracking Coding Questions (Part 3 of 3): interview-questions/coding/graphs-dp-part-3.md
+    - Stream API Problems (Part 1 of 2): interview-questions/coding/stream-api-problems-part-1.md
+    - Stream API Problems (Part 2 of 2): interview-questions/coding/stream-api-problems-part-2.md
+    - Java-Specific Coding Problems (Part 1 of 3): interview-questions/coding/java-coding-problems-part-1.md
+    - Java-Specific Coding Problems (Part 2 of 3): interview-questions/coding/java-coding-problems-part-2.md
+    - Java-Specific Coding Problems (Part 3 of 3): interview-questions/coding/java-coding-problems-part-3.md
+  - Behavioural Questions:
+    - Overview: interview-questions/behavioural/index.md
+    - STAR Method and Answer Structure: interview-questions/behavioural/star-method.md
+    - Leadership and Teamwork Questions: interview-questions/behavioural/leadership-and-teamwork.md
+    - Conflict and Failure Questions: interview-questions/behavioural/conflict-and-failure.md
+    - Career Motivation Questions: interview-questions/behavioural/career-motivation.md
+- Resources:
+  - Overview: resources/index.md
+  - Complete Full Stack Java Developer Roadmap:
+    - Overview: resources/full-stack-java-roadmap/index.md
+    - Part 1 - Foundations, Core Java & DSA: resources/full-stack-java-roadmap/part-1-foundations-dsa.md
+    - Part 2 - Data, JDBC & Spring: resources/full-stack-java-roadmap/part-2-data-spring.md
+    - Part 3 - Production Engineering: resources/full-stack-java-roadmap/part-3-production-engineering.md
+    - Part 4 - System Design, Interview & Projects: resources/full-stack-java-roadmap/part-4-design-interview-projects.md
