@@ -340,29 +340,6 @@ These are older or specialist technologies you may be asked about. Know what the
 
 ---
 
-## HANDS‑ON PROJECT ROADMAP (Resume‑Ready)
-### Beginner Projects
-- CLI Banking System
-- OOP + exceptions
-- String Utility Toolkit
-- Encodings, reversals
-- Array Analytics Tool
-
-### Intermediate Projects
-- Employee Management System
-- Collections + Streams
-- File‑Based Task Manager
-- I/O + Serialization
-- Multithreaded File Downloader
-
-### Advanced Projects
-- In‑Memory Order Processing Engine
-- Concurrency + Streams
-- Generic Cache Framework
-- Generics + Map
-- Producer‑Consumer Messaging System
-- Industry‑Grade Capstone
-
 ## Back to the Start
 
 Return to the [overview](index.md) to start again from Phase 1.
