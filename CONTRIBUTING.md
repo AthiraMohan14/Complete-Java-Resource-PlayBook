@@ -1,0 +1,1 @@
+This repository is read-only: content changes are not accepted, but you can share feedback, suggest topics, or report errors on the [Feedback](https://AthiraMohan14.github.io/Complete-Java-Resource-PlayBook/feedback/) page.

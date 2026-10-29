@@ -1,0 +1,60 @@
+site_name: Complete Java Resources Playbook
+site_description: A complete Java resource and interview-prep playbook, organised by the full stack Java developer roadmap.
+site_url: https://AthiraMohan14.github.io/Complete-Java-Resource-PlayBook/
+repo_url: https://github.com/AthiraMohan14/Complete-Java-Resource-PlayBook
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Feedback: feedback.md
+  - Resources:
+      - Overview: resources/index.md
+      - Complete Full Stack Java Developer Roadmap:
+          - Overview: resources/full-stack-java-roadmap/index.md
+          - Part 1 - Foundations, Core Java & DSA: resources/full-stack-java-roadmap/part-1-foundations-dsa.md
+          - Part 2 - Data, JDBC & Spring: resources/full-stack-java-roadmap/part-2-data-spring.md
+          - Part 3 - Production Engineering: resources/full-stack-java-roadmap/part-3-production-engineering.md
+          - Part 4 - System Design, Interview & Projects: resources/full-stack-java-roadmap/part-4-design-interview-projects.md
