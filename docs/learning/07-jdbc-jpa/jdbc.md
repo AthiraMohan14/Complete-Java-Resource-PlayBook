@@ -87,6 +87,113 @@ A `ResultSet` is a cursor over query results. Its type controls movement:
 
 Concurrency: `CONCUR_READ_ONLY` (default) or `CONCUR_UPDATABLE`. Read columns by name or index, and check for SQL `NULL` with `wasNull()` after reading a primitive, because `getInt` returns `0` for NULL.
 
+### BLOB and CLOB values
+
+A BLOB column holds binary data and a CLOB column holds long text. JDBC maps them to `java.sql.Blob` and `java.sql.Clob`. Small values can go in as a `byte[]` or a `String`. Large values should be streamed, so the whole value is never held in memory at once.
+
+| Direction | Small value | Large value, streamed |
+|---|---|---|
+| Write BLOB | `setBytes(index, byte[])` | `setBinaryStream(index, InputStream)` |
+| Write CLOB | `setString(index, String)` | `setCharacterStream(index, Reader)` |
+| Read BLOB | `getBytes(column)` | `getBinaryStream(column)` |
+| Read CLOB | `getString(column)` | `getClob(column)`, then read the `Clob` in pieces |
+
+```java
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.sql.Clob;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
+public class DocumentStore {
+
+    // Small binary value: send the bytes directly
+    static void saveThumbnail(Connection conn, long id, byte[] thumbnail) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO document (id, thumb) VALUES (?, ?)")) {
+            ps.setLong(1, id);
+            ps.setBytes(2, thumbnail);
+            ps.executeUpdate();
+        }
+    }
+
+    // Large binary value: stream the file into the BLOB column
+    static void saveFile(Connection conn, long id, Path file) throws SQLException, IOException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO document (id, content) VALUES (?, ?)");
+             InputStream in = Files.newInputStream(file)) {
+            ps.setLong(1, id);
+            ps.setBinaryStream(2, in);
+            ps.executeUpdate();
+        }
+    }
+
+    // Large text value: stream the reader into the CLOB column
+    static void saveText(Connection conn, long id, Path textFile) throws SQLException, IOException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "UPDATE document SET body = ? WHERE id = ?");
+             Reader reader = Files.newBufferedReader(textFile)) {
+            ps.setCharacterStream(1, reader);
+            ps.setLong(2, id);
+            ps.executeUpdate();
+        }
+    }
+
+    // Read a BLOB by streaming it into a file
+    static void readFile(Connection conn, long id, Path target) throws SQLException, IOException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT content FROM document WHERE id = ?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    try (InputStream in = rs.getBinaryStream("content")) {
+                        if (in != null) {          // null means SQL NULL
+                            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Read a CLOB through the Clob locator, then release it
+    static String readText(Connection conn, long id) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT body FROM document WHERE id = ?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                Clob clob = rs.getClob("body");
+                if (clob == null) {
+                    return null;
+                }
+                try {
+                    return clob.getSubString(1, (int) clob.length());   // positions start at 1
+                } finally {
+                    clob.free();
+                }
+            }
+        }
+    }
+}
+```
+
+Points to remember:
+
+- Read the value while the `ResultSet` and transaction are still open. Some drivers invalidate a `Blob` or `Clob` locator when the result set or transaction ends.
+- `Blob` and `Clob` positions are 1-based, not 0-based.
+- Call `free()` on a locator when you finish with it, so the driver can release its resources. The `readText` example shows this.
+- The one-argument stream setters are JDBC 4.0 forms that do not take a length. Some drivers still need the length, so check your driver's documentation.
+- `getClob` in the example reads the whole value into a `String`. For very large text, read through `getCharacterStream` in chunks instead.
+
 ### Batches
 
 Batching sends many statements in one round trip.

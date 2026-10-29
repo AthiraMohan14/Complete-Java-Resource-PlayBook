@@ -66,6 +66,17 @@ ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
 
 The launcher class name depends on the Spring Boot version. Its package changed in newer Spring Boot 3.x releases, so check the documentation for your version before copying this line.
 
+### Choosing a base image
+The base image sets the size and attack surface of the runtime. Three options are common:
+
+| Base image | Typical use | Trade-off |
+|---|---|---|
+| Full JDK (`eclipse-temurin:21`) | Building, not running | Largest; includes compilers and tools you do not need at runtime |
+| JRE on a general Linux base (`eclipse-temurin:21-jre`) | Simple production images | Includes a shell and package tools, which helps debugging |
+| Distroless Java (`gcr.io/distroless/java21-*`) | Hardened production images | Only the Java runtime and your app; no shell, so `docker exec sh` fails |
+
+Distroless images suit production because they hold fewer packages that can carry known vulnerabilities. Their cost is debugging: you cannot open a shell in the container. Use a debug variant of the image in a test environment, or attach an ephemeral debug container (for example, `kubectl debug`) to a running pod. Pin the image tag, and check the tag list for a Debian base that is still maintained, because old tags stop receiving security updates.
+
 ### JVM memory in containers
 Modern JVMs read the container's memory limit (cgroup) instead of the host's total memory. Even so, a fixed heap size is fragile. Prefer percentages:
 
@@ -127,6 +138,63 @@ Spring's relaxed binding lets environment variables override properties. For exa
 
 ### Running as a non-root user
 Set `USER` to a non-root account and make sure the directories the app writes to are owned by that user. Running as non-root limits the damage from a compromised process. Combined with a read-only root filesystem, it reduces attack surface further.
+
+## Container security best practices
+A container image is a package that runs with whatever rights you grant it. Four habits cover most of the risk for a Spring Boot service.
+
+### 1. Run as a non-root user
+Create a system user in the Dockerfile and switch to it before the entrypoint. Use a numeric UID if the platform enforces `runAsNonRoot`.
+
+```dockerfile
+FROM eclipse-temurin:21-jre
+RUN groupadd --system app && useradd --system --gid app app
+WORKDIR /app
+COPY target/app.jar app.jar
+USER app
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+Give the user write access only to the directories it needs, such as a temporary directory.
+
+### 2. Scan images for known vulnerabilities
+Base images and Java libraries carry known CVEs. Scan each image in the build pipeline with a scanner such as Trivy, Grype, or the scanner built into your registry, and fail the build on high-severity findings that have fixes. Scanning is a point-in-time check, so rescan images that are already deployed, because new CVEs appear after a build.
+
+### 3. Keep secrets out of the image
+Anything written in a `RUN`, `COPY`, or `ARG` step stays in the image history, and anyone who pulls the image can read it. Passwords, tokens, and private keys belong at runtime instead:
+
+- Inject them as environment variables or mounted files, from a Secret or a vault.
+- For a secret needed only during build, such as a private repository token, use a BuildKit secret mount, which does not persist in a layer:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+RUN --mount=type=secret,id=repo_token \
+    ./mvnw -s settings.xml dependency:go-offline
+```
+
+Also add a `.dockerignore` file so that local `.env` files and key material are never copied into the build context.
+
+### 4. Use a read-only root filesystem
+Most services need to write only to a few paths. Mount the root filesystem as read-only, and give writable `emptyDir` volumes to the paths that need them. Spring Boot's embedded Tomcat and temporary-file handling use `/tmp`, so that path is the usual one to make writable.
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+volumes:
+  - name: tmp
+    emptyDir: {}
+```
+
+The same idea works outside Kubernetes with `docker run --read-only --tmpfs /tmp`.
+
+### Also keep images small and tags pinned
+Pin the base image to a specific tag rather than a floating one such as `latest`, so the build is repeatable and updates are deliberate. Multi-stage builds and a minimal runtime base reduce the number of packages that can carry vulnerabilities.
 
 ## How it works / Step by step
 1. The build produces an executable JAR, or the buildpack builds one for you.

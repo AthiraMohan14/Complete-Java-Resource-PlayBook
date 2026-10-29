@@ -23,3 +23,10 @@ Know when a query language, a binary RPC protocol, or a persistent connection fi
 Authenticate and authorise callers, limit abuse, and validate everything that comes in.
 
 **See also:** [Part 4 roadmap, section 21](../../resources/full-stack-java-roadmap/part-4-design-interview-projects.md)
+
+### More in this section
+
+### [Documenting APIs with OpenAPI and springdoc](openapi-documentation.md)
+**Core concepts - Code-first versus design-first - How it works - Common pitfalls - Quick recap**
+OpenAPI is a standard, machine-readable format for describing HTTP APIs. It was formerly called Swagger. A spec lists the paths, methods, parameters, request and response...
+

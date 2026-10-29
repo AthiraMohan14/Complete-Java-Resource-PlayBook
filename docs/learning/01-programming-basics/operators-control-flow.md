@@ -151,6 +151,70 @@ String kind = switch (day) {
 System.out.println(kind);
 ```
 
+### The five forms of switch
+`switch` has grown over several releases. Knowing which form is available in which version is a common interview check.
+
+| Form | Since | Produces a value | Falls through | Typical use |
+|---|---|---|---|---|
+| Classic statement (`case X:`) | Java 1.0 | No | Yes, unless `break` | Legacy code, deliberate fall-through |
+| Arrow statement (`case X ->`) | Java 14 | No | No | Running one action per case |
+| Switch expression | Java 14 | Yes | No | Computing a value, with `yield` in blocks |
+| Pattern matching | Java 21 | Either | No | Type tests with `when` guards and `case null` |
+| Record patterns | Java 21 | Either | No | Destructuring record components in a case |
+
+The classic form accepts `int`-compatible primitives, their wrappers, `char`, `String`, and enums. It does not accept `long`, `float`, `double`, or `boolean`.
+
+Pattern matching lets a `switch` select on any reference type. A sealed hierarchy lets the compiler check that every subtype is handled, so no `default` is needed:
+
+```java
+sealed interface Shape permits Circle, Square {}
+record Circle(double radius) implements Shape {}
+record Square(double side) implements Shape {}
+
+public class Areas {
+    static double area(Shape shape) {
+        return switch (shape) {
+            case Circle c -> Math.PI * c.radius() * c.radius();
+            case Square s -> s.side() * s.side();
+        };
+    }
+
+    static String classify(Object obj) {
+        return switch (obj) {
+            case null -> "null";
+            case Integer i when i > 0 -> "positive int " + i;   // guard
+            case Integer i -> "other int " + i;
+            case String s -> "string of length " + s.length();
+            default -> "something else";
+        };
+    }
+
+    public static void main(String[] args) {
+        System.out.println(area(new Square(2)));   // 4.0
+        System.out.println(classify(-3));          // other int -3
+    }
+}
+```
+
+Record patterns destructure a record in the `case` label, and they can be nested:
+
+```java
+class PointLocator {
+
+    record Point(int x, int y) { }
+
+    static String locate(Object obj) {
+        return switch (obj) {
+            case Point(int x, int y) when x == 0 && y == 0 -> "origin";
+            case Point(int x, int y) -> "point at " + x + ", " + y;
+            default -> "not a point";
+        };
+    }
+}
+```
+
+Pattern matching `switch` is final in Java 21. Before 21 these forms do not compile, so check the `--release` setting when a snippet fails.
+
 ### Loops
 ```java
 for (int i = 0; i < 3; i++) {          // classic for: init, condition, update

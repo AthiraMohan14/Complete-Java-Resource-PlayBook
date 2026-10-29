@@ -55,6 +55,64 @@ Trade-offs to know:
 - The **N+1 problem** appears when a list resolver loads a related record once per item. Batching loaders (such as the DataLoader pattern) group those lookups.
 - Errors are returned in the response body alongside partial data, not through status codes alone.
 
+### Spring for GraphQL
+
+Spring for GraphQL maps schema fields to controller methods. Add `spring-boot-starter-graphql`, and put the schema in a `.graphqls` file under `src/main/resources/graphql/`:
+
+```graphql
+type Query {
+  book(id: ID!): Book
+}
+
+type Mutation {
+  renameBook(id: ID!, title: String!): Book
+}
+
+type Book {
+  id: ID!
+  title: String!
+  author: Author
+}
+
+type Author {
+  id: ID!
+  name: String!
+}
+```
+
+```java
+import org.springframework.graphql.data.method.annotation.Argument;
+import org.springframework.graphql.data.method.annotation.MutationMapping;
+import org.springframework.graphql.data.method.annotation.QueryMapping;
+import org.springframework.graphql.data.method.annotation.SchemaMapping;
+import org.springframework.stereotype.Controller;
+
+public record Author(String id, String name) {}
+
+public record Book(String id, String title, String authorId) {}
+
+@Controller
+public class BookGraphQlController {
+
+    @QueryMapping
+    public Book book(@Argument String id) {
+        return new Book(id, "Sample book", "a1");   // load from a service
+    }
+
+    @MutationMapping
+    public Book renameBook(@Argument String id, @Argument String title) {
+        return new Book(id, title, "a1");
+    }
+
+    @SchemaMapping(typeName = "Book", field = "author")
+    public Author author(Book book) {
+        return new Author(book.authorId(), "Sample author");   // one lookup per book
+    }
+}
+```
+
+The `author` method runs once for each book in a list, which is the N+1 problem in GraphQL form. For lists, use a batch mapping (`@BatchMapping`) so the lookups are grouped into one call.
+
 ### gRPC: Protocol Buffers over HTTP/2
 
 **gRPC** is a remote procedure call framework. You define services and messages in a `.proto` file using **Protocol Buffers** (protobuf), and tooling generates client and server code. Messages are compact binary, and gRPC runs over **HTTP/2**, which multiplexes many calls over one connection and supports streaming.
@@ -118,6 +176,37 @@ Connection management is the hard part:
 
 HTTP/2 multiplexes requests over one connection and compresses headers. HTTP/3 runs over QUIC. Both matter for performance, and gRPC depends on HTTP/2. You rarely configure them in application code, but know that they change connection costs.
 
+### Webhooks: server-initiated callbacks
+
+A webhook reverses the usual direction. You register a URL with the provider, and the provider sends an HTTP `POST` to it when an event happens. The receiver does not poll. Payment notifications and CI or source-control events work this way.
+
+- The sender signs each payload with a shared secret, usually an HMAC in a header. The receiver verifies it before doing anything else (see [Password Security and OWASP](../10-security/password-security-owasp.md)).
+- Delivery is usually at least once. Retries mean the same event can arrive twice, so the receiver deduplicates by event ID.
+- The receiver should store the event durably and return a `2xx` quickly, then process it asynchronously. A slow handler causes the sender to time out and retry.
+
+### SOAP and WS-*
+
+SOAP is an XML messaging protocol. A service publishes a WSDL file that describes its operations, and tools generate clients from it. Its strengths are a strict contract and the WS-* standards for security and reliable messaging. Enterprises and older integrations still use it heavily.
+
+| Aspect | SOAP | REST |
+|---|---|---|
+| Model | Exposes operations | Exposes resources |
+| Contract | WSDL, often written first | OpenAPI, often generated from code |
+| Format | XML envelopes | Usually JSON |
+| Transport | Any, including HTTP, SMTP, and JMS | HTTP semantics |
+| State | Can carry conversational state through WS-* features | Stateless by design |
+| Security | WS-Security standards | HTTPS plus token schemes such as OAuth 2.0 |
+| Typical use | Enterprise and legacy integrations | Public and mobile APIs |
+
+REST is not tied to HTTPS. It is normally deployed over TLS, but the style does not require it. SOAP messages are also typically larger, so the performance gap is usually visible in high-volume calls.
+
+Choose SOAP when a partner requires its contract, when you need WS-* security or transactions, or when the transport is not HTTP. Choose REST for public, cacheable, and mobile-facing APIs.
+
+### Other options
+
+- **JSON** is the format most REST APIs use. It is lightweight and easy to read, and it is the default choice for responses.
+- **Falcor** is a JavaScript library from Netflix that merges several data sources into one client-side model and caches results locally. It is a niche choice, mostly relevant to front-end teams with a large data-fetching problem.
+
 ### Choosing
 
 | Need | Good fit | Why |
@@ -127,6 +216,8 @@ HTTP/2 multiplexes requests over one connection and compresses headers. HTTP/3 r
 | Internal service calls, high throughput | gRPC | Typed contracts, binary, streaming |
 | Server pushes live updates both ways | WebSockets | Persistent bidirectional channel |
 | Server pushes one-way updates | Server-Sent Events | Simpler than WebSockets for this case |
+| Notify another system when an event happens | Webhooks | The provider calls your endpoint; no polling |
+| Strict enterprise contract, WS-* security, non-HTTP transport | SOAP | WSDL contract and WS-* standards |
 
 ## How it works
 

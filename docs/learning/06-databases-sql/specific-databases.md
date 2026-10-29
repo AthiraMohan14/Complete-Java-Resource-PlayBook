@@ -88,6 +88,39 @@ Know these at the level of "what kind of data model, and when would you consider
 
 The common trade-off: relational databases give joins, constraints, and transactions; NoSQL stores give horizontal scale and flexible schemas, but you design for specific access patterns in advance.
 
+### Relational vs NoSQL at a glance
+
+| | Relational (SQL) | NoSQL (general) |
+|---|---|---|
+| Schema | Fixed and enforced by the database | Flexible, or none |
+| Scaling | Usually scaled up first; sharding adds work | Horizontal by design |
+| Consistency | Strong, with ACID transactions | Tunable; often BASE (see Advanced SQL and Transactions) |
+| Joins | Native | Limited or absent |
+| Best for | Integrity-critical data and complex queries | Scale, varied record shapes, known access patterns |
+
+Relational engines include MySQL, PostgreSQL, Oracle, SQL Server, and MariaDB. They share the SQL model but differ in syntax, extensions, and tooling, so check vendor syntax for upserts, paging, and identity columns before you port a query.
+
+### NoSQL data models
+
+| Model | Examples | Structure | Typical use | Watch for |
+|---|---|---|---|---|
+| Key-value | Redis, Memcached, DynamoDB | A key maps to a value the store does not interpret | Caching, sessions, counters | Lookups by key only; other queries need a different store or index |
+| Document | MongoDB, CouchDB, Firebase | JSON-like documents with flexible fields | Content, user profiles, catalogues | Consistency settings; work across many documents costs more |
+| Column-family | Cassandra, HBase, Bigtable | Wide, sparse rows grouped into column families | High write volume, time series, scans by key | Tables are designed per query; consistency is tunable |
+| Graph | Neo4j, ArangoDB | Nodes connected by typed relationships | Recommendations, social links, fraud rings | Strong for traversals; weaker for bulk aggregation |
+| Search engine | Elasticsearch, Solr | Inverted index over text fields | Full-text search, log search, faceted filters | Usually a secondary index, not the system of record |
+
+Pick the model from the question the application asks:
+
+| Need | Model | Example |
+|---|---|---|
+| Multi-row transactions and integrity | Relational | Payments, inventory |
+| Records with varied fields | Document | Product catalogue |
+| Very fast simple reads and writes | Key-value | Session store |
+| Heavy write volume over time | Column-family | Sensor readings |
+| Following relationships | Graph | Friend-of-friend queries |
+| Ranked text search | Search engine | Site search |
+
 ## How it works / Step by step
 
 Choosing a database for a feature:

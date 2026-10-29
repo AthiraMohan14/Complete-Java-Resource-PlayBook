@@ -45,6 +45,8 @@ public class ListCapacity {
 }
 ```
 
+Capacity and memory are worth knowing for interviews. An `ArrayList` created with the no-argument constructor starts with an empty shared array and allocates a backing array of 10 slots on the first `add`. When that array is full, OpenJDK grows it to about 1.5 times the old size and copies the references across. The list therefore holds a reference array plus the element objects themselves, and any unused slots still take memory. If you know the final size, pass it to the constructor, or call `ensureCapacity` before a bulk load, to avoid repeated copies.
+
 Use `ArrayList` as the default list. It has good cache locality, and most workloads are dominated by iteration and indexed reads.
 
 ### LinkedList
@@ -114,6 +116,39 @@ public class SortByLength {
 ```
 
 This example needs `java.util.Comparator`. Ordering is covered in detail on the ordering page.
+
+### Cost of common list operations
+
+| Operation | `ArrayList` | `LinkedList` |
+|---|---|---|
+| `get(i)` / `set(i, x)` | O(1) | O(n) |
+| Add at the end | Amortized O(1) | O(1) |
+| Add or remove at the front | O(n) | O(1) |
+| Insert at the current position of a `ListIterator` | O(n) | O(1) once the node is held |
+| `contains(x)` | O(n) | O(n) |
+
+The last row is the only case where `LinkedList` wins for lists. It still needs an iterator that already points at the spot, which the next example shows.
+
+```java
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+
+public class InsertAfterMatch {
+    public static void main(String[] args) {
+        List<String> steps = new LinkedList<>(List.of("plan", "build", "ship"));
+        ListIterator<String> it = steps.listIterator();
+        while (it.hasNext()) {
+            if (it.next().equals("build")) {
+                it.add("test");   // inserts right after "build", no index arithmetic
+            }
+        }
+        System.out.println(steps); // [plan, build, test, ship]
+    }
+}
+```
+
+`ArrayList` also has `ListIterator.add`, so the code above compiles with either type. The difference is the cost of the insert, which is linear for `ArrayList` and constant for `LinkedList`.
 
 ## How it works / Step by step
 

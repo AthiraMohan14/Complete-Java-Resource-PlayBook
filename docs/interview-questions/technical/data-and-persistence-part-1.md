@@ -1,11 +1,11 @@
-# Data and Persistence Questions (Part 1 of 2)
+# Data and Persistence Questions (Part 1 of 4)
 
 Questions on SQL, indexing, transactions and isolation, JDBC, JPA and Hibernate, Spring Data, schema migrations, and the common data stores. Expect follow-ups that ask you to explain a query plan or a slow endpoint.
 
 ---
 
 
-This page is split into 2 parts. Continue to [Part 2](data-and-persistence-part-2.md).
+This page is split into 3 parts. Continue to [Part 2](data-and-persistence-part-2.md).
 
 ## 1. What is the difference between a primary key, a unique key, and a foreign key?
 

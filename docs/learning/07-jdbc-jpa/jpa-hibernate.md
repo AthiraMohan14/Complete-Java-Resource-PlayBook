@@ -154,6 +154,54 @@ public class Customer {
 
 Callbacks are methods on the entity (or on a separate listener class registered with `@EntityListeners`). Keep them simple; a callback that calls other services is hard to test and easy to get wrong.
 
+### Auditing timestamps with @CreationTimestamp and @UpdateTimestamp
+
+Most tables need to record when a row was created and last changed. Writing those values by hand in every service is easy to forget. Hibernate's `@CreationTimestamp` and `@UpdateTimestamp` fill the columns for you when the entity is saved.
+
+```java
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+@Entity
+@Table(name = "invoices")
+public class Invoice {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @CreationTimestamp
+    @Column(nullable = false, updatable = false)   // written once, on insert
+    private Instant createdAt;
+
+    @UpdateTimestamp
+    @Column(nullable = false)                      // refreshed on every update
+    private Instant updatedAt;
+}
+```
+
+The two annotations behave differently:
+
+- `@CreationTimestamp` sets the value when the entity is inserted. Keeping `updatable = false` on the column protects it from later changes.
+- `@UpdateTimestamp` sets the value on insert and again each time the entity is flushed with changes. Hibernate only writes it when a column is actually dirty, so an unchanged entity keeps its old value.
+
+Both work with the `java.time` types such as `Instant`, `OffsetDateTime`, and `LocalDateTime`. Prefer `Instant` or `OffsetDateTime` for stored timestamps. A `LocalDateTime` has no zone, so it is ambiguous when the application runs in more than one time zone.
+
+Some writes bypass the annotations, and this is the part interviewers test:
+
+- A bulk JPQL or HQL update (`UPDATE Invoice i SET ...`) runs in the database and does not touch the entity, so `updatedAt` stays stale. Set it in the query yourself.
+- Native SQL and direct JDBC writes do not go through Hibernate at all.
+- Lifecycle callbacks such as `@PreUpdate` do not run for bulk updates either.
+
+Spring Data offers a more portable option. `@CreatedDate` and `@LastModifiedDate` work with `@EntityListeners(AuditingEntityListener.class)` and `@EnableJpaAuditing`, and `@CreatedBy` and `@LastModifiedBy` take their values from an `AuditorAware` bean. The Hibernate annotations are simpler and need no configuration, but they are specific to Hibernate.
+
 ### The persistence context and first-level cache
 
 The `EntityManager` (Hibernate's `Session`) holds the **persistence context**, which is also the first-level cache. Within one context, loading the same ID twice returns the same Java object. The cache lasts only for the context, usually one transaction.
@@ -163,6 +211,232 @@ A second-level cache is optional and shared across sessions. It needs explicit c
 ### Detached entities and merge
 
 An entity is detached once its context closes. Changes to a detached object are not saved automatically. `merge()` copies a detached object's state onto a managed copy and returns that copy; use the returned instance, not the original.
+
+### ID generation strategies
+
+The `@GeneratedValue` strategy decides where an identifier comes from. Pick it with the target database in mind.
+
+| Strategy | Source of the ID | Notes |
+|---|---|---|
+| `IDENTITY` | Auto-increment column | Simple. Hibernate must run the INSERT to learn the ID, so insert batching is limited |
+| `SEQUENCE` | Database sequence | Preferred on PostgreSQL, Oracle, and similar. `allocationSize` must match the sequence's increment |
+| `TABLE` | Rows in a helper table | Portable, but slow under contention; rarely the right choice now |
+| `AUTO` | Chosen by the dialect | Convenient, but the strategy can change when you switch databases |
+| Assigned in code | Your application | Used for UUIDs created in the application and for imports that carry their own IDs |
+
+```java
+import jakarta.persistence.*;
+
+@Entity
+public class Invoice {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "invoice_seq")
+    @SequenceGenerator(name = "invoice_seq", sequenceName = "invoice_seq", allocationSize = 50)
+    private Long id;   // the sequence must be created with INCREMENT BY 50
+}
+```
+
+A UUID assigned in code needs no database round trip and stays unique across services:
+
+```java
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import java.util.UUID;
+
+@Entity
+public class Shipment {
+
+    @Id
+    private UUID id = UUID.randomUUID();   // assigned before persist
+}
+```
+
+### Persisting: persist, save, merge, and update
+
+Four operations come up in interviews. They differ in the state the entity must be in when you call them.
+
+| Operation | Expected input | Result | Typical use |
+|---|---|---|---|
+| `persist` (JPA `EntityManager`) | New (transient) | Managed; INSERT at flush or commit | Creating new entities |
+| `save` (Spring Data) | New or detached | Returns the managed instance | Everyday repository writes |
+| `merge` (JPA) | Detached | Returns a new managed copy; the argument stays detached | Writing back a detached object |
+| `update` (Hibernate `Session`) | Detached | Reattaches the same object for an UPDATE | Rare. It is a Hibernate-native API; `EntityManager` has no `update` method |
+
+Spring Data's `save` calls `persist` when the entity is new (its ID is null, or it has no version value) and `merge` otherwise. With `SEQUENCE`, the ID is fetched at `persist` time. With `IDENTITY`, Hibernate runs the INSERT straight away to get the ID.
+
+```java
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Id;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Entity
+class Customer {
+    @Id
+    private Long id;
+    private String name;
+
+    void setName(String name) { this.name = name; }
+}
+
+@Service
+class CustomerWriter {
+
+    private final EntityManager em;
+
+    CustomerWriter(EntityManager em) {
+        this.em = em;
+    }
+
+    @Transactional
+    public Customer rename(Long id, String newName) {
+        Customer managed = em.find(Customer.class, id);
+        managed.setName(newName);     // dirty checking writes the UPDATE at commit
+        return managed;
+    }
+
+    @Transactional
+    public Customer saveDetached(Customer detached) {
+        return em.merge(detached);    // use the returned instance, not the argument
+    }
+}
+```
+
+### Dirty checking and flush
+
+Hibernate keeps a snapshot of each managed entity's state. At flush, it compares the current state with the snapshot and writes SQL for the differences. That is why a managed entity needs no explicit save.
+
+- A flush runs before commit. In the default `AUTO` mode it also runs before a query, so the query sees the pending changes.
+- `em.flush()` sends pending SQL now, still inside the transaction. `em.clear()` detaches everything, which helps in long batch jobs that would otherwise grow the persistence context.
+- Without a transaction there is no commit point. A read returns a detached entity (unless open-session-in-view is active), so later changes are never written.
+
+### Cascade types
+
+`cascade` says which operations on the parent also apply to its children.
+
+| Type | Effect on children |
+|---|---|
+| `PERSIST` | Persisted with the parent |
+| `MERGE` | Merged with the parent |
+| `REMOVE` | Removed with the parent |
+| `REFRESH` | Reloaded with the parent |
+| `DETACH` | Detached with the parent |
+| `ALL` | All of the above |
+
+`orphanRemoval = true` goes further: a child removed from the collection is deleted. Use cascades for children the parent owns, such as order lines. Cascading `REMOVE` across a shared association deletes rows that other parents still use.
+
+### Many-to-many and one-to-one
+
+A many-to-many association needs a join table. One side owns it with `@JoinTable`; the other side points back with `mappedBy`.
+
+```java
+import jakarta.persistence.*;
+import java.util.HashSet;
+import java.util.Set;
+
+@Entity
+class Student {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    Long id;
+
+    @ManyToMany
+    @JoinTable(name = "student_course",
+            joinColumns = @JoinColumn(name = "student_id"),
+            inverseJoinColumns = @JoinColumn(name = "course_id"))
+    Set<Course> courses = new HashSet<>();
+}
+
+@Entity
+class Course {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    Long id;
+
+    @ManyToMany(mappedBy = "courses")
+    Set<Student> students = new HashSet<>();
+}
+```
+
+A one-to-one works the same way: the side with `@JoinColumn` owns the foreign key, and the inverse side uses `mappedBy`. Update both sides in code, as the `addLine` helper above does.
+
+### Composite keys with @EmbeddedId and @MapsId
+
+A join entity can use a composite key built from the two foreign keys. `@MapsId` says that the `order` association supplies one part of that key.
+
+```java
+import jakarta.persistence.*;
+import java.io.Serializable;
+import java.util.Objects;
+
+@Embeddable
+class OrderItemKey implements Serializable {
+    Long orderId;
+    Long productId;
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof OrderItemKey k
+                && Objects.equals(orderId, k.orderId)
+                && Objects.equals(productId, k.productId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(orderId, productId);
+    }
+}
+
+@Entity
+class OrderItem {
+    @EmbeddedId
+    OrderItemKey id;
+
+    @ManyToOne(optional = false)
+    @MapsId("orderId")
+    Order order;   // the Order entity shown earlier on this page
+}
+```
+
+The embedded key must implement `Serializable`, and `equals` and `hashCode` must use every field.
+
+### Choosing identifiers
+
+- Use a surrogate key (a `Long` from `IDENTITY` or `SEQUENCE`, or a `UUID`) as the primary key.
+- Keep natural keys such as e-mail addresses as unique constraints, not as primary keys. If the value changes, it would have to change in every foreign key.
+- Use UUIDs when IDs are created outside the database, for example by distributed services or offline clients. They are larger and index less compactly than sequential numbers.
+
+### Batch fetching and extra-lazy collections
+
+When a join fetch is not possible (for example, you need pagination), batch fetching loads children for several parents in one query.
+
+```java
+import jakarta.persistence.*;
+import java.util.ArrayList;
+import java.util.List;
+import org.hibernate.annotations.BatchSize;
+
+@Entity
+class Department {
+    @Id
+    Long id;
+
+    @OneToMany(mappedBy = "department")
+    @BatchSize(size = 20)
+    List<Employee> employees = new ArrayList<>();
+}
+
+@Entity
+class Employee {
+    @Id
+    Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    Department department;
+}
+```
+
+`@BatchSize` is Hibernate-specific. The portable setting is `hibernate.default_batch_fetch_size` in configuration. Hibernate's `@LazyCollection(LazyCollectionOption.EXTRA)` can count or check a collection without loading all of it, but it is Hibernate-only, so use it with care.
 
 ## How it works / Step by step
 

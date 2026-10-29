@@ -37,6 +37,19 @@ Roadmap sections 24 (Interview Preparation) is covered in the [Interview Questio
 
 ---
 
+## Supplementary Topics
+
+These sections cover background and reference material that sits alongside the roadmap.
+
+| Topic | Folder | What it covers |
+|---|---|---|
+| Foundations | [foundations](foundations/index.md) | Software process, design principles, networking, web basics, regular expressions, and testing |
+| Design Patterns | [design-patterns](design-patterns/index.md) | Creational, structural, and behavioural patterns, plus SOLID and anti-patterns |
+| AI and Machine Learning | [ai-machine-learning](ai-machine-learning/index.md) | ML fundamentals and algorithms, deep learning, transformers, RAG, and AI in Java |
+| Time-Boxed Java Roadmap | [../resources/time-boxed-java-roadmap](../resources/time-boxed-java-roadmap/index.md) | A second, shorter plan across nine phases |
+
+---
+
 ## How to Study a Topic
 
 1. Read the topic page from start to finish.

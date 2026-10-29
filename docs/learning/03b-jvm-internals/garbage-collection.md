@@ -60,6 +60,20 @@ You cannot optimise all three at once. The collector you choose sets the balance
 
 Shenandoah is another low-pause collector available in some OpenJDK builds. It is not part of every JDK distribution, so check your vendor before relying on it.
 
+### Default collector by Java version
+
+When you do not pass a collector flag, the JVM picks one based on the machine it runs on. "Server-class" means at least two CPUs and about 2 GB of memory, which covers most servers and containers you will deploy to.
+
+| Java version | Default collector (server-class machine) | Notes |
+|---|---|---|
+| Java 8 | Parallel GC | On small or single-CPU machines the JVM picks Serial GC instead |
+| Java 9 | G1 | G1 became the default with JEP 248 |
+| Java 11 | G1 | Unchanged from Java 9 |
+| Java 17 | G1 | Unchanged |
+| Java 21 | G1 | Unchanged; virtual threads change how many threads an app runs, not which collector is the default |
+
+If you move a service from Java 8 to a newer JDK, measure pauses again. The same heap settings can behave differently under G1, which is tuned for pause time rather than raw throughput.
+
 ### CMS was removed
 
 The Concurrent Mark Sweep (CMS) collector was deprecated in Java 9 and removed in Java 14. Its replacement is G1. Launch scripts that still pass `-XX:+UseConcMarkSweepGC` fail on a current JDK, so they need to be updated.
@@ -75,6 +89,20 @@ java -XX:+UseG1GC -XX:MaxGCPauseMillis=200 MyApp
 ```
 
 `MaxGCPauseMillis` is a goal, not a guarantee. If the goal is too aggressive for the live data, G1 may run longer pauses or fall back to a full collection.
+
+### G1 phases
+
+G1 does not run one big cycle. It alternates short young pauses with a background marking cycle, then uses mixed pauses to reclaim old regions a few at a time.
+
+| Phase | Stops application threads? | What happens |
+|---|---|---|
+| Young GC | Yes, briefly | Live objects in Eden and survivor regions are copied to survivor or old regions. The collector also starts concurrent marking when old-generation occupancy passes `InitiatingHeapOccupancyPercent` (default 45). |
+| Concurrent mark | No, runs alongside the application | Traces the live object graph from the GC roots. The first step, initial mark, is done inside a young pause. |
+| Remark | Yes, briefly | Finishes marking using the snapshot taken at the start of the cycle, and identifies regions that are now empty or nearly empty. |
+| Cleanup | Mostly a short pause | Records live-data totals for each old region and frees regions that hold no live objects. It does not compact the heap; copying happens in evacuation pauses. |
+| Mixed GC | Yes | Evacuates all young regions together with the old regions that hold the most garbage, so old space is reclaimed in small steps. |
+
+In normal operation the sequence is: young pauses, then a marking cycle (concurrent mark, remark, cleanup), then several mixed pauses, then young pauses again. If young collections cannot keep up while marking is running, G1 can fall back to a full stop-the-world collection.
 
 ### ZGC in more detail
 
@@ -199,6 +227,19 @@ Things to look for:
 - Many back-to-back "Allocation Failure" messages mean allocation outpaces collection.
 
 Tools that read these logs include GCViewer and GCEasy (third-party), and the JDK's `jstat -gc <pid>` for live counters.
+
+### Common GC symptoms and fixes
+
+Most GC problems show up first as a latency or memory symptom. Match the symptom to a likely cause, then confirm it with GC logs or a heap dump before changing flags.
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Full GC thrashing: frequent full collections, high CPU, little memory freed | Live data close to `-Xmx`, a leak, or an allocation rate the old generation cannot absorb | Find what keeps data alive (heap dump). Reduce the live set or allocation rate. Raise `-Xmx` only if the live data really fits in the larger heap. |
+| Long pauses: requests time out during collections | Large live set being copied, very large (humongous) objects, a throughput-tuned collector such as Parallel, or an unrealistic pause goal | Shrink the live set. Use G1 or ZGC for latency-sensitive services. Set `MaxGCPauseMillis` to a value the workload can meet, and check logs for full collections. |
+| High GC overhead: a large share of CPU goes to collection | High allocation rate with a small young generation, or a heap that stays nearly full | Reduce short-lived allocations (reuse buffers, avoid temporary collections). Give the young generation or the heap more room. |
+| Memory leak: old-generation usage climbs after each full collection | Static collections, caches with no size limit, listeners never removed, or `ThreadLocal` values left in pooled threads | Take a heap dump (`jmap -dump:live,format=b,file=heap.hprof <pid>`, or `-XX:+HeapDumpOnOutOfMemoryError`). Open it in a tool such as Eclipse MAT and follow the retaining paths. Bound caches, remove listeners, and call `ThreadLocal.remove()` when work ends. |
+
+No fixed CPU percentage defines "high GC overhead". The JVM throws `OutOfMemoryError: GC overhead limit exceeded` when almost all of its time goes to GC and very little memory is recovered. Treat that error as a sign to fix allocations or the heap, not as something to switch off.
 
 ---
 

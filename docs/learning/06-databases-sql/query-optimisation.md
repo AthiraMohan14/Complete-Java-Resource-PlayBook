@@ -41,6 +41,8 @@ SELECT order_id FROM orders WHERE created_on >= DATE '2026-01-01';
 
 Indexes are not free. Each one slows inserts and updates, takes storage, and must be maintained. Add indexes for queries you actually run, and remove unused ones.
 
+A unique index is also a constraint: it rejects duplicate values, and it is the target that upserts need (see [Intermediate SQL](intermediate-sql.md)). Dropping an index needs vendor-specific syntax. MySQL and SQL Server use `DROP INDEX idx_orders_customer_date ON orders;`, while PostgreSQL uses `DROP INDEX idx_orders_customer_date;`. PostgreSQL's `DROP INDEX CONCURRENTLY` avoids blocking writes on a busy table.
+
 ### Reading execution plans with EXPLAIN
 
 `EXPLAIN` shows the plan the optimiser chose. Some databases also run the query with `EXPLAIN ANALYZE` (PostgreSQL, and MySQL 8.0.18 and later through `EXPLAIN ANALYZE`) and report actual timings and row counts.

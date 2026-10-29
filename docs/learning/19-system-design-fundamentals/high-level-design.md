@@ -121,6 +121,38 @@ A synchronous call waits for the response, so the caller's latency includes the 
 
 Keep analytics off the transactional database. Replicate or stream changes into an analytical store so long reports do not slow checkout.
 
+### API gateway
+An API gateway is the single entry point for external clients. It routes each request to the right service and handles cross-cutting concerns once, instead of in every service: authentication, TLS termination, rate limiting, request logging, and sometimes aggregation, where the gateway combines several internal calls into one response for a client.
+
+Keep the gateway thin. Routing and policy belong there; business rules belong in services. A gateway that holds business logic becomes a bottleneck that every team must change. Make it highly available, because every external request passes through it.
+
+### Rate limiting
+Rate limiting caps how many requests a client, key, or route may make in a period. It protects services from overload and from noisy callers.
+
+- **Token bucket**: tokens refill at a steady rate and each request spends one. It allows short bursts up to the bucket size.
+- **Leaky bucket**: requests drain at a fixed rate, which smooths traffic but adds queueing delay.
+- **Fixed window**: a counter per window, such as per minute. It is cheap, but traffic can double up at a window boundary.
+- **Sliding window**: counts over a moving period, which avoids the boundary problem at a higher cost.
+
+Place the limiter at the gateway or in middleware, and keep the counters in a shared store such as Redis, so every instance sees the same count. When the limit is hit, return `429 Too Many Requests` with a `Retry-After` header. Decide whether the limiter fails open (allow traffic when the store is down) or fails closed (deny it).
+
+### Unique IDs
+Many designs need IDs that are unique across many servers without a central bottleneck.
+
+- **Database sequence**: simple and ordered, but every ID needs a round trip to one database.
+- **UUID**: no coordination needed, but 128 bits, not sortable by creation time in the usual form, and less friendly for indexes.
+- **Snowflake-style IDs**: a 64-bit number built from a timestamp, a machine ID, and a per-millisecond sequence. The timestamp keeps IDs roughly time-ordered, and each machine can generate IDs without coordinating. The machine IDs must be assigned without collisions.
+
+Snowflake-style IDs suit feeds, messages, and orders where time-ordering helps. A machine that moves its clock backwards needs protection, or it can produce duplicates.
+
+### API design and pagination
+Design the API before the storage, and make the contract explicit: resource names, methods, status codes, and request limits. For lists, choose a pagination style deliberately:
+
+- **Offset pagination** (`?page=5&size=20`) is easy to use, but the database must skip rows, so deep pages get slower. New rows inserted during paging can also shift results.
+- **Cursor or keyset pagination** (`?after=<last-seen-key>`) asks for rows after a known position, so cost stays flat and results do not shift. It is harder for clients who want to jump to page 40.
+
+Use cursors for feeds and large, changing collections. Offset pagination is fine for small, stable lists.
+
 ## How it works / Step by step
 Designing the path of a read request in a typical web system:
 1. A DNS entry and a CDN serve static assets from the edge.

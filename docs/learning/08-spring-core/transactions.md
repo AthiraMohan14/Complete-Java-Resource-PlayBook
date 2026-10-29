@@ -143,6 +143,186 @@ public class SettlementService {
 
 `PlatformTransactionManager` is the abstraction Spring uses for all transaction resources. Spring Boot configures one automatically (for JPA, `JpaTransactionManager`; for JDBC, `DataSourceTransactionManager`).
 
+### Multiple databases and transaction managers
+
+When an application writes to two databases, each database needs its own transaction manager, and Spring cannot make one `@Transactional` method commit both atomically. Name the managers, mark one as `@Primary`, and choose the other explicitly on the annotation.
+
+```java
+import jakarta.persistence.EntityManagerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
+
+@Configuration
+class TransactionManagers {
+
+    @Bean
+    @Primary
+    PlatformTransactionManager ordersTx(@Qualifier("ordersEmf") EntityManagerFactory emf) {
+        return new JpaTransactionManager(emf);
+    }
+
+    @Bean
+    PlatformTransactionManager auditTx(@Qualifier("auditEmf") EntityManagerFactory emf) {
+        return new JpaTransactionManager(emf);
+    }
+}
+```
+
+```java
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+class OrderWithAudit {
+
+    @Transactional                                        // uses the primary manager
+    public void placeOrder() { }
+
+    @Transactional(transactionManager = "auditTx")        // separate transaction on the audit database
+    public void recordAudit() { }
+}
+```
+
+Two points come up in interviews. First, Boot's JPA auto-configuration backs off once you define your own `EntityManagerFactory` and transaction manager, so you take responsibility for both. Second, if the audit write must match the order write, a single transaction is not possible. Use an outbox table in the primary database, or a saga with compensation, instead of two commits that can disagree.
+
+### Wiring a DataSource and EntityManagerFactory per database
+
+A transaction manager is only half of a second database. Each database also needs its own `DataSource` and its own `EntityManagerFactory`, and the factory must be pointed at the right entity package. Boot's auto-configuration creates one set of these, and it steps back once you define your own, so you define both sets explicitly. The pattern below keeps Boot's Hibernate settings by taking the `EntityManagerFactoryBuilder` that Boot provides.
+
+```java
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+import org.springframework.boot.autoconfigure.orm.jpa.EntityManagerFactoryBuilder;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+
+@Configuration
+class OrdersDatabaseConfig {
+
+    @Bean
+    @Primary
+    @ConfigurationProperties("app.orders.datasource")
+    DataSourceProperties ordersDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean
+    @Primary
+    DataSource ordersDataSource(@Qualifier("ordersDataSourceProperties") DataSourceProperties props) {
+        return props.initializeDataSourceBuilder().build();
+    }
+
+    @Bean
+    @Primary
+    LocalContainerEntityManagerFactoryBean ordersEmf(
+            @Qualifier("ordersDataSource") DataSource dataSource,
+            EntityManagerFactoryBuilder builder) {
+        return builder.dataSource(dataSource)
+                .packages("com.example.orders.domain")   // only the orders entities
+                .persistenceUnit("orders")
+                .build();
+    }
+}
+
+@Configuration
+class AuditDatabaseConfig {
+
+    @Bean
+    @ConfigurationProperties("app.audit.datasource")
+    DataSourceProperties auditDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean
+    DataSource auditDataSource(@Qualifier("auditDataSourceProperties") DataSourceProperties props) {
+        return props.initializeDataSourceBuilder().build();
+    }
+
+    @Bean
+    LocalContainerEntityManagerFactoryBean auditEmf(
+            @Qualifier("auditDataSource") DataSource dataSource,
+            EntityManagerFactoryBuilder builder) {
+        return builder.dataSource(dataSource)
+                .packages("com.example.audit.domain")
+                .persistenceUnit("audit")
+                .build();
+    }
+}
+```
+
+Each factory gets its own persistence unit name and its own entity package, so Hibernate never maps an entity to the wrong database. The transaction managers from the previous section then use these factories by name. Keep the two packages disjoint: an entity picked up by both factories is mapped twice.
+
+Two cautions. Repositories also need to be bound to the right factory, which Spring Data does with `@EnableJpaRepositories` and the `entityManagerFactoryRef` and `transactionManagerRef` attributes, one configuration per database. And a JPA entity that references an entity in the other database cannot be joined in SQL, so the link must be a plain id.
+
+### Read-write split with a routing DataSource
+
+When one database has a read replica, you can send reads to the replica and writes to the primary. Spring's `AbstractRoutingDataSource` picks a `DataSource` per connection, based on a lookup key. Use the transaction's `readOnly` flag as that key, so a method annotated `@Transactional(readOnly = true)` reads from the replica without any change to the repository code.
+
+```java
+import java.util.Map;
+import javax.sql.DataSource;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.datasource.LazyConnectionDataSourceProxy;
+import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+enum Route { WRITE, READ }
+
+class ReadWriteRouter extends AbstractRoutingDataSource {
+
+    @Override
+    protected Object determineCurrentLookupKey() {
+        return TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                ? Route.READ
+                : Route.WRITE;
+    }
+}
+
+@Configuration
+class ReadWriteConfig {
+
+    @Bean("primaryDataSource")
+    DataSource primaryDataSource() {
+        return DataSourceBuilder.create().url("jdbc:postgresql://primary-host/orders").build();
+    }
+
+    @Bean("replicaDataSource")
+    DataSource replicaDataSource() {
+        return DataSourceBuilder.create().url("jdbc:postgresql://replica-host/orders").build();
+    }
+
+    @Bean
+    @Primary
+    DataSource routingDataSource(@Qualifier("primaryDataSource") DataSource primary,
+                                 @Qualifier("replicaDataSource") DataSource replica) {
+        ReadWriteRouter router = new ReadWriteRouter();
+        router.setTargetDataSources(Map.of(Route.WRITE, primary, Route.READ, replica));
+        router.setDefaultTargetDataSource(primary);
+        return new LazyConnectionDataSourceProxy(router);   // pick the connection after the flag is known
+    }
+}
+```
+
+The `LazyConnectionDataSourceProxy` wrapper matters. It delays acquiring the physical connection until the first statement, so the routing decision sees the transaction's read-only flag. Without it, the connection can be opened before the flag is set and every query goes to the primary.
+
+Three cautions for an interview answer:
+
+- Replicas lag behind the primary. A read right after a write, from a read-only transaction, can miss the write. Send read-your-own-write flows to the primary.
+- Check the routing with a test that asserts which database a read-only query used. The exact timing depends on the transaction manager, and the flag can be set after a JPA transaction has already taken a connection, so confirm it for your setup rather than assuming it.
+- Mark only truly read-only methods as `readOnly = true`. A write sent through a read-only transaction goes to the replica and fails.
+
 ### Self-invocation and visibility
 
 Two common reasons an annotation has no effect:

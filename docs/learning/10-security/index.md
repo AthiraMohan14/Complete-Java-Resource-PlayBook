@@ -29,3 +29,10 @@ Keeping credentials out of code and Git, injecting them at runtime, and rotating
 ---
 
 **See also:** [Building REST APIs](../09-spring-boot/rest-apis.md) | [HTTP Clients and Testing](../09-spring-boot/http-clients-and-testing.md) | [Testing](../11-testing/index.md)
+
+### More in this section
+
+### [Secure Coding and Supply Chain](secure-coding-and-supply-chain.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Secure coding means writing code that resists common attacks, and supply-chain security means trusting only the third-party code you actually run. Interviewers ask about the...
+

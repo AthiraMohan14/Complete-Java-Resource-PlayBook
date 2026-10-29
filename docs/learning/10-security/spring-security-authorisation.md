@@ -132,6 +132,231 @@ Method security applies only when the call crosses the Spring proxy. A method ca
 
 An `AuthenticationManager` delegates to one or more `AuthenticationProvider` beans. Each provider knows how to authenticate one kind of credential, such as username and password, a JWT, or a certificate. Custom providers are the extension point when your login does not fit the defaults.
 
+## Login, ownership, and error handling
+
+### A login endpoint with AuthenticationManager
+
+A login endpoint hands the submitted credentials to the `AuthenticationManager`. The manager is exposed as a bean, typically from `AuthenticationConfiguration.getAuthenticationManager()`.
+
+```java
+import java.util.Map;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+record LoginRequest(String username, String password) {}
+
+@RestController
+@RequestMapping("/auth")
+class LoginController {
+
+    private final AuthenticationManager authenticationManager;
+
+    LoginController(AuthenticationManager authenticationManager) {
+        this.authenticationManager = authenticationManager;
+    }
+
+    @PostMapping("/login")
+    ResponseEntity<Map<String, String>> login(@RequestBody LoginRequest request) {
+        try {
+            Authentication auth = authenticationManager.authenticate(
+                    UsernamePasswordAuthenticationToken.unauthenticated(
+                            request.username(), request.password()));
+            // A real API issues a token here (see the authentication page)
+            return ResponseEntity.ok(Map.of("user", auth.getName()));
+        } catch (BadCredentialsException ex) {
+            // The same message for unknown users and wrong passwords
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "invalid username or password"));
+        }
+    }
+}
+```
+
+Throw `BadCredentialsException`, not a generic `RuntimeException`, so the status code is correct. By default the DAO authentication provider reports an unknown user as bad credentials too, which keeps account names from leaking through the response.
+
+### Ownership rules with a custom principal
+
+An expression such as `authentication.principal.id` needs the principal to have an `id` property. Spring's default `User` has none. Create a `UserDetails` implementation that exposes `getId()`, and load it in your `UserDetailsService`. Then the SpEL expression works.
+
+### Custom permission checks
+
+A `PermissionEvaluator` answers `hasPermission(...)` expressions. It is useful when the rule depends on the object's owner or state. Register it in a `MethodSecurityExpressionHandler`, or the expression fails at runtime.
+
+```java
+import java.io.Serializable;
+import org.springframework.security.access.PermissionEvaluator;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+
+record Post(Long id, String authorName) {}
+
+@Component
+class PostPermissionEvaluator implements PermissionEvaluator {
+
+    @Override
+    public boolean hasPermission(Authentication authentication, Object target, Object permission) {
+        if (target instanceof Post post && "EDIT".equals(permission)) {
+            return post.authorName().equals(authentication.getName()) || hasRole(authentication, "ADMIN");
+        }
+        return false;
+    }
+
+    @Override
+    public boolean hasPermission(Authentication authentication, Serializable targetId,
+                                 String targetType, Object permission) {
+        return false;   // an ID-based check would load the object here
+    }
+
+    private boolean hasRole(Authentication authentication, String role) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
+    }
+}
+```
+
+```java
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.access.PermissionEvaluator;
+import org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler;
+import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+
+@Configuration
+@EnableMethodSecurity
+class MethodSecurityConfig {
+
+    @Bean
+    static MethodSecurityExpressionHandler methodSecurityExpressionHandler(PermissionEvaluator evaluator) {
+        DefaultMethodSecurityExpressionHandler handler = new DefaultMethodSecurityExpressionHandler();
+        handler.setPermissionEvaluator(evaluator);
+        return handler;
+    }
+}
+```
+
+```java
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Service;
+
+@Service
+class PostService {
+
+    @PreAuthorize("hasPermission(#post, 'EDIT')")
+    Post update(Post post) {
+        return post;   // persist the change here
+    }
+}
+```
+
+The parameter name `post` in the expression is resolved from the method signature. Spring Boot's parent POM compiles with `-parameters`, so the names are available; without it, annotate the parameter with `@P("post")`.
+
+### Shaping responses by role
+
+Prefer separate response types for each audience over setting fields to `null` for non-admins. With separate types, a new sensitive field cannot reach the wrong audience by accident. Choose the endpoint or the response type from the caller's authorities, and keep the admin-only fields out of the public record.
+
+```java
+import java.time.Instant;
+import java.util.List;
+
+public record UserView(long id, String username) {}
+
+public record AdminUserView(long id, String username, String email,
+                            List<String> roles, Instant createdAt) {}
+```
+
+### JSON errors for 401 and 403
+
+By default, Spring Security's error responses are not in your API's format. Replace the access-denied handler, and set an authentication entry point for missing or invalid credentials, so both return a Problem Details body (see [Pagination, Errors, and Idempotency](../21-api-design/pagination-errors-idempotency.md)).
+
+```java
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.stereotype.Component;
+
+@Component
+class JsonAccessDeniedHandler implements AccessDeniedHandler {
+
+    private final ObjectMapper mapper;
+
+    JsonAccessDeniedHandler(ObjectMapper mapper) {
+        this.mapper = mapper;
+    }
+
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response,
+                       AccessDeniedException ex) throws IOException {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, "You do not have permission for this action.");
+        problem.setTitle("Access denied");
+        response.setStatus(HttpStatus.FORBIDDEN.value());
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        mapper.writeValue(response.getOutputStream(), problem);
+    }
+}
+```
+
+Register the handler in the filter chain with `http.exceptionHandling(ex -> ex.accessDeniedHandler(handler))`. Write a matching `AuthenticationEntryPoint` for `401`, using the same pattern.
+
+### Auditing access with AOP
+
+An aspect can record who called a sensitive method. Put the annotation on the method and let the aspect read the caller from the `SecurityContext`.
+
+```java
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@interface Audited {
+}
+```
+
+```java
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+
+@Aspect
+@Component
+class AuditAspect {
+
+    private static final Logger log = LoggerFactory.getLogger(AuditAspect.class);
+
+    @Around("@annotation(com.example.security.Audited)")
+    public Object audit(ProceedingJoinPoint joinPoint) throws Throwable {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String caller = auth == null ? "anonymous" : auth.getName();
+        log.info("audit caller={} operation={}", caller, joinPoint.getSignature().toShortString());
+        return joinPoint.proceed();
+    }
+}
+```
+
+The aspect needs `spring-boot-starter-aop`. Log only identifiers, never request bodies or secrets. For compliance, write to a protected audit table rather than an ordinary application log. Also decide whether to record before or after the call; this example records before it, so a failed call is still logged.
+
 ## How it works / Step by step
 
 1. The request enters `DelegatingFilterProxy`, then `FilterChainProxy`.

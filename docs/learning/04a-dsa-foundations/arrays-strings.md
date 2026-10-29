@@ -132,6 +132,37 @@ static boolean isAnagram(String s, String t) {
 
 Run time is O(n) and space is O(1) for a fixed alphabet.
 
+### Palindrome checks
+
+A palindrome reads the same forwards and backwards. Compare characters from both ends and move inward. If the question ignores spaces and letter case, normalise the text first. Both versions below run in O(n) time. The recursive one also uses O(n) call-stack space, so it is unsafe for very long input.
+
+```java
+import java.util.stream.IntStream;
+
+public class Palindrome {
+    // Loop-free check: compare each pair from the outside in
+    static boolean isPalindrome(String text) {
+        String clean = text.replaceAll("\\s+", "").toLowerCase();
+        return IntStream.range(0, clean.length() / 2)
+                .allMatch(i -> clean.charAt(i) == clean.charAt(clean.length() - 1 - i));
+    }
+
+    // Recursive check: compare the outer pair, then recurse on the inside
+    static boolean isPalindromeRecursive(String clean, int lo, int hi) {
+        if (lo >= hi) {
+            return true;
+        }
+        return clean.charAt(lo) == clean.charAt(hi)
+                && isPalindromeRecursive(clean, lo + 1, hi - 1);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(isPalindrome("A man a plan a canal Panama"));           // true
+        System.out.println(isPalindromeRecursive("racecar", 0, "racecar".length() - 1)); // true
+    }
+}
+```
+
 ### String matching: KMP
 Finding a pattern of length m in text of length n by trying every start position costs O(n·m). KMP avoids re-checking characters by using a prefix table. The table stores, for each position in the pattern, the length of the longest proper prefix that is also a suffix. Matching then costs O(n + m).
 
@@ -213,5 +244,6 @@ static int kmpSearch(String text, String pat) {
 - Binary search needs a monotonic condition. Use `lo + (hi - lo) / 2` and a clear bound convention.
 - Prefix sums turn repeated range sums into O(1) queries.
 - KMP matches a pattern in O(n + m) using a prefix table.
+- Palindrome checks compare pairs from both ends; normalise case and spaces first.
 
 **See also:** [Linked Lists](linked-lists.md), [Stacks & Queues](stacks-queues.md), [Trees](trees.md), [DSA Foundations](index.md)

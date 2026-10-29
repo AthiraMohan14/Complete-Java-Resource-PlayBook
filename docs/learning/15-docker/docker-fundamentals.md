@@ -130,6 +130,20 @@ The first process in a container is PID 1, and the Linux kernel treats it specia
 
 The JVM handles SIGTERM by running shutdown hooks, which makes it well suited to this model when it is PID 1.
 
+### Troubleshooting a container
+When a container misbehaves, work through a short list of commands:
+
+```bash
+docker logs --tail 200 -f <container>            # stdout and stderr of the main process
+docker exec -it <container> sh                   # open a shell (fails on distroless images)
+docker exec <container> env                      # confirm the environment the app actually sees
+docker stats --no-stream                         # one-off CPU and memory usage per container
+docker inspect -f '{{.State.OOMKilled}}' <container>   # true when the kernel killed the process for memory
+docker inspect <container>                       # mounts, networks, restart policy, and state
+```
+
+To check how the JVM sizes itself inside an image, run `java -XshowSettings:vm` in a throwaway container. It prints the heap limits and the container memory the JVM detected. Scan images for known vulnerabilities as part of the build, with a tool such as Docker Scout or Trivy, rather than waiting for a production incident.
+
 ## Common pitfalls
 - Using the `latest` tag in production, which makes deployments non-reproducible.
 - Running as root, which is the default unless you set `USER`.

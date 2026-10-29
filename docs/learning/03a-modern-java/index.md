@@ -25,3 +25,10 @@ Virtual threads, record patterns, pattern matching for `switch`, and the Java 22
 ---
 
 **See also:** [Java 8 lambdas and streams](java8-lambdas-streams.md) - [Optional and functional interfaces](optional-functional-interfaces.md) - [Java 9 to 17](java9-to-17-features.md) - [Java 21](java21-features.md)
+
+### More in this section
+
+### [Java LTS Versions and Migration](lts-versions-and-migration.md)
+**Core concepts - Migration path: 8, 11, 17, 21 - Decision guide - Migration practice - Interview tip**
+Oracle ships a feature release every six months, and a few of those releases are designated long-term support (LTS). Interviewers ask which version a team should run, which...
+

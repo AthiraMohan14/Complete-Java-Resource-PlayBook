@@ -101,6 +101,29 @@ public class FirstLine {
 
 If the body throws and `close()` also throws, the close exception is attached to the first as a suppressed exception, which you can read with `getSuppressed()`. This is the main reason to prefer try-with-resources over a manual `finally` with `close()`.
 
+### Multi-catch and catch order
+A multi-catch block handles several unrelated exception types with one handler. The alternatives must not be subclasses of each other. Catch clauses are checked from top to bottom, so put the most specific type first. Catching a superclass before its subclass is a compile error.
+
+```java
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+
+class CountReader {
+
+    static int readCount(String path) {
+        try {
+            return Integer.parseInt(Files.readString(Path.of(path)).trim());
+        } catch (NoSuchFileException e) {                   // most specific first: a missing file means zero
+            return 0;
+        } catch (IOException | NumberFormatException e) {   // multi-catch: unrelated types
+            throw new IllegalStateException("cannot read count from " + path, e);
+        }
+    }
+}
+```
+
 ### throw versus throws
 - `throw` raises an exception object: `throw new IllegalArgumentException("quantity must be positive");`
 - `throws` declares what a method may raise: `void save() throws IOException`.
@@ -138,6 +161,19 @@ static int parseSetting(String raw) {
 
 An exception that is not caught propagates up the call stack until a handler is found. If none is found, the thread's uncaught exception handler prints it and the thread ends.
 
+### Handling InterruptedException
+`Thread.sleep`, `join`, and many blocking calls throw `InterruptedException` when another thread interrupts them. Do not swallow it with an empty catch block. Either let it propagate, or restore the interrupt status so that code further up can see the request to stop:
+
+```java
+static void pause(long millis) {
+    try {
+        Thread.sleep(millis);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();   // restore the flag for callers
+    }
+}
+```
+
 ### Reading stack traces
 A stack trace lists the exception type and message, then the frames from the throw point up to the caller. The top line is the most specific frame in your code; the `Caused by:` section shows the chained root cause. Read from the top to find where the exception was created, and from the bottom to find the entry point. Stack traces are captured when the exception is created, so creating exceptions in tight loops is expensive.
 
@@ -158,6 +194,8 @@ A stack trace lists the exception type and message, then the frames from the thr
 - Using `e.printStackTrace()` in production code instead of a logger.
 - Declaring `throws Exception` on a method, which hides what can actually go wrong.
 - Creating and catching `NullPointerException` instead of preventing the null in the first place.
+- Writing an empty catch block for `InterruptedException`, which loses the interrupt request.
+- Throwing a generic `Exception` or `RuntimeException` with no message. Name the failure and include the values involved.
 
 !!! tip "Interview tip"
     **Q: When should you use a checked exception versus an unchecked one?** Use a checked exception when the caller can reasonably recover, such as a missing file the caller can replace. Use an unchecked exception for programming errors or invalid arguments the caller should not handle. Many modern APIs prefer unchecked exceptions because checked ones spread through every signature.

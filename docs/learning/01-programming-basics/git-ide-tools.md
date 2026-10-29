@@ -104,6 +104,28 @@ jar --create --file app.jar --main-class com.example.app.Main -C out .
 java -jar app.jar
 ```
 
+### Inspecting bytecode with javap
+`javap` disassembles a compiled class. It lists fields and method signatures, and with `-c` it prints the bytecode instructions. Use it to check what the compiler produced, for example how a string concatenation or an enhanced `for` loop is translated. `-p` includes private members.
+
+```text
+javap -p out/com/example/app/Main.class       # signatures, including private members
+javap -c -p out/com/example/app/Main.class    # plus the bytecode of each method
+```
+
+### Debugging from the terminal with jdb
+`jdb` is the JDK's command-line debugger. It attaches to a program started with debugging enabled, or launches one itself. The commands are the same ones an IDE debugger uses: set a breakpoint, run, step, and print a variable.
+
+```text
+jdb -classpath out com.example.app.Main
+> stop at com.example.app.Main:12    # breakpoint on line 12
+> run
+> print total                         # inspect a local variable
+> step                                # run the current line, entering calls
+> cont                                # resume until the next breakpoint
+```
+
+For remote programs, start the JVM with `-agentlib:jdwp` and attach `jdb` to the port it reports. The IDE debugger uses the same protocol.
+
 ## How it works / Step by step
 
 1. Git tracks changes in three areas: the working tree, the staging area (`git add`), and the commit history (`git commit`).

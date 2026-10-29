@@ -114,6 +114,19 @@ Big-O figures describe typical implementations and are the usual interview answe
 - Need to process by priority? `PriorityQueue`.
 - Need thread-safe access? `ConcurrentHashMap` for maps, `CopyOnWriteArrayList` for lists read far more often than written.
 
+### List versus Set at a glance
+
+| Feature | `List` | `Set` |
+|---|---|---|
+| Order | Insertion order kept by all implementations | Not guaranteed, unless `LinkedHashSet` or `TreeSet` |
+| Duplicates | Allowed | Rejected |
+| Index access | `get(i)`, `set(i, x)` | Not available |
+| Null | Multiple nulls allowed | One null in `HashSet` and `LinkedHashSet`; none in `TreeSet` |
+| Common implementations | `ArrayList`, `LinkedList`, `Vector` | `HashSet`, `LinkedHashSet`, `TreeSet` |
+| Typical use | Keeping a sequence | Uniqueness and fast membership tests |
+
+Pick a list when order or position matters, such as a list of steps. Pick a set when the question is "is this item already here?", such as unique email addresses or tags.
+
 ### Immutable factory methods
 Java 9 added `List.of`, `Set.of`, and `Map.of`. These return unmodifiable collections that reject `null` elements and throw `UnsupportedOperationException` on change. `Set.of` and `Map.of` also throw `IllegalArgumentException` on duplicates. `List.copyOf`, `Set.copyOf`, and `Map.copyOf` make unmodifiable copies.
 

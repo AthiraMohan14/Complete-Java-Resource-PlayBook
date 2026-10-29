@@ -16,6 +16,18 @@ System.out.println(boxed + parsed);        // 165: unboxing happens in the arith
 
 `new Integer(...)` and the other wrapper constructors are deprecated for removal; use `valueOf` or autoboxing.
 
+### How int and double are represented
+An `int` is a 32-bit two's-complement integer, so its range is -2,147,483,648 to 2,147,483,647. Arithmetic wraps silently on overflow: `Integer.MAX_VALUE + 1` is `Integer.MIN_VALUE`. Use `Math.addExact` when overflow should be an error.
+
+A `double` is a 64-bit IEEE 754 floating-point number. It has one sign bit, 11 exponent bits, and 52 bits of significand. That gives about 15 to 16 significant decimal digits. Because most decimal fractions have no exact binary form, rounding errors are normal:
+
+```java
+System.out.println(Integer.MAX_VALUE + 1);   // -2147483648
+System.out.println(0.1 + 0.2);               // 0.30000000000000004
+```
+
+Where a primitive lives depends on where it is declared. A local variable lives in its method's stack frame, and the JIT compiler may keep it in a register. A primitive field lives inside its object on the heap. An array of primitives is one heap object.
+
 ### Autoboxing and unboxing
 The compiler inserts boxing (primitive to wrapper) and unboxing (wrapper to primitive) automatically when a context needs the other form.
 
@@ -82,6 +94,16 @@ System.out.println(String.join(", ", "a", "b")); // a, b
 System.out.println("a,b,,c".split(",").length); // 4: trailing empties are dropped, empty middle kept
 ```
 
+### The string pool and intern()
+Literals that appear in the code are stored in the string pool, which is part of the heap. Two identical literals refer to the same object. `new String(...)` always creates a new object outside the pool. `intern()` returns the pooled instance for a string's contents, adding it to the pool if needed.
+
+```java
+String literal = "hello";
+String built = new String("hello");
+System.out.println(literal == built);             // false: separate object
+System.out.println(literal == built.intern());    // true: the pooled instance
+```
+
 ### == versus equals()
 `==` compares references (identity) for objects and values for primitives. `equals()` compares content when the class overrides it, and `String` does. Always compare strings with `equals()`. To ignore case, use `equalsIgnoreCase`. For null-safe comparison of a value you control, write `"expected".equals(value)`.
 
@@ -104,6 +126,35 @@ for (int i = 0; i < 3; i++) {
 sb.setLength(sb.length() - 1);   // drop the trailing comma
 System.out.println(sb);          // 0,1,2
 ```
+
+### Hashing versus encryption
+Both transform data, but they answer different questions.
+
+| Feature | Hashing | Encryption |
+|---|---|---|
+| Purpose | Detect changes; store secrets that must never be read back | Keep data confidential so that authorized parties can read it |
+| Reversible | No: a one-way function | Yes, with the right key |
+| Key | Not used (unless a keyed MAC is used) | Required to encrypt and decrypt |
+| Output size | Fixed for each algorithm | Depends on the input and the mode |
+| Java API | `java.security.MessageDigest`, `Mac` | `javax.crypto.Cipher` |
+
+A hash is useful for integrity checks, such as comparing a file's digest with a published value. The example below prints the SHA-256 digest of a short string. `HexFormat` needs Java 17 or later.
+
+```java
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+
+public class DigestDemo {
+    public static void main(String[] args) throws Exception {
+        MessageDigest sha = MessageDigest.getInstance("SHA-256");
+        byte[] digest = sha.digest("order-42".getBytes(StandardCharsets.UTF_8));
+        System.out.println(HexFormat.of().formatHex(digest));
+    }
+}
+```
+
+Passwords need more than a plain digest. Store them with a slow, salted password hash such as bcrypt, scrypt, Argon2, or PBKDF2, so that identical passwords do not produce identical stored values and guessing is expensive. A single fast hash such as SHA-256 is not enough.
 
 ### Arrays
 Arrays have a fixed length set at creation and store one type. They are objects, and they live on the heap.

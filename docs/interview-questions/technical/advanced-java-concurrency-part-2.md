@@ -264,6 +264,251 @@ Use the same questions in each case: which object type holds the most memory, wh
 
 ---
 
+## 17. Which design patterns do you use most, and how do you pick one?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+The Gang of Four patterns fall into three groups. Creational patterns control how objects are made (Singleton, Factory, Builder). Structural patterns control how objects are composed (Decorator, Adapter, Proxy). Behavioural patterns control how objects cooperate (Observer, Strategy, Template Method). Pick a pattern by the problem you are solving, not by the name.
+
+### Explanation
+A pattern is useful when the code has a recurring shape. Match the symptom to the pattern:
+
+| Symptom | Pattern | Typical example |
+|---|---|---|
+| Creation logic is spread across callers | Factory | Choosing a database driver from a config value |
+| Object has many optional settings | Builder | An HTTP request with headers, timeouts, and a body |
+| Behaviour must change at runtime | Strategy | Swapping a pricing rule or a sort order |
+| Several parts react to one event | Observer | UI listeners, domain events |
+| Two APIs do not match | Adapter | Wrapping a legacy client behind your interface |
+| Add cross-cutting behaviour around an object | Decorator | Logging, compression, or retry around a call |
+
+Strategy is the most common one in modern Java because a lambda can stand in for a small strategy interface:
+
+```java
+import java.util.Comparator;
+import java.util.List;
+
+class PricingDemo {
+    interface DiscountRule {
+        double apply(double amount);
+    }
+
+    static double checkout(double amount, DiscountRule rule) {
+        return rule.apply(amount);
+    }
+
+    public static void main(String[] args) {
+        DiscountRule halfOff = a -> a * 0.5;
+        DiscountRule flatFive = a -> Math.max(0, a - 5);
+        System.out.println(checkout(100, halfOff));  // 50.0
+        System.out.println(checkout(100, flatFive)); // 95.0
+
+        List<String> names = new java.util.ArrayList<>(List.of("bo", "alice"));
+        names.sort(Comparator.comparingInt(String::length)); // Strategy via Comparator
+        System.out.println(names);
+    }
+}
+```
+
+### When to use / pitfalls
+- Do not add a pattern "for later". Start with the simplest code and refactor when the variation appears.
+- Singleton is easy to overuse. It hides dependencies and makes tests harder. Prefer passing the instance in through a constructor, which a DI container can manage.
+- A pattern name in an interview is a shorthand. Explain the problem it solves and the trade-off it adds.
+
+**See also:** [Design patterns (learning)](../../learning/design-patterns/creational-patterns.md), [Core Java](core-java-part-1.md)
+
+</details>
+
+---
+
+## 18. Explain the Decorator pattern with a working example.
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+A decorator implements the same interface as the object it wraps, holds a reference to that object, and adds behaviour before or after delegating. You can stack decorators in any order at runtime. This is more flexible than creating a subclass for every combination of features.
+
+### Explanation
+```java
+import java.time.Instant;
+
+interface Notifier {
+    void send(String message);
+}
+
+class EmailNotifier implements Notifier {
+    @Override
+    public void send(String message) {
+        System.out.println("email: " + message);
+    }
+}
+
+abstract class NotifierDecorator implements Notifier {
+    protected final Notifier inner;
+
+    NotifierDecorator(Notifier inner) {
+        this.inner = inner;
+    }
+}
+
+class UpperCaseDecorator extends NotifierDecorator {
+    UpperCaseDecorator(Notifier inner) { super(inner); }
+
+    @Override
+    public void send(String message) {
+        inner.send(message.toUpperCase());
+    }
+}
+
+class TimestampDecorator extends NotifierDecorator {
+    TimestampDecorator(Notifier inner) { super(inner); }
+
+    @Override
+    public void send(String message) {
+        inner.send("[" + Instant.now() + "] " + message);
+    }
+}
+
+class DecoratorDemo {
+    public static void main(String[] args) {
+        Notifier n = new TimestampDecorator(new UpperCaseDecorator(new EmailNotifier()));
+        n.send("deploy finished");
+    }
+}
+```
+
+The JDK uses the same idea. `new BufferedReader(new InputStreamReader(System.in))` wraps one reader inside another, and each layer adds buffering or decoding. `GZIPOutputStream` wraps any `OutputStream` to add compression.
+
+### When to use / pitfalls
+- Decorator keeps the same interface. If the wrapper needs a different interface, you want an Adapter.
+- Stacking many small decorators makes debugging harder, because the call passes through several layers. Keep the chain short.
+- Decorator changes behaviour on one object. Inheritance changes it for every instance of the class and is fixed at compile time.
+- Spring's proxy-based features (such as `@Transactional`) are implemented with proxies. A proxy often looks like a decorator, but its purpose is interception rather than adding a feature.
+
+**See also:** [Structural patterns](../../learning/design-patterns/structural-patterns.md), [Design patterns](../../learning/design-patterns/creational-patterns.md)
+
+</details>
+
+---
+
+## 19. How do generics and type erasure work, and what are PECS rules?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Generics give compile-time type checking, so you do not need casts when reading from a collection. The compiler then erases the type parameters: at runtime `List<String>` and `List<Integer>` are the same class. Use `? extends T` when you only read from a structure and `? super T` when you only write to it. This is the PECS rule: Producer Extends, Consumer Super.
+
+### Explanation
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+class ErasureDemo {
+    static double sum(List<? extends Number> producer) {
+        double total = 0;
+        for (Number n : producer) {        // reading: producer
+            total += n.doubleValue();
+        }
+        return total;
+    }
+
+    static void addInts(List<? super Integer> consumer) {
+        consumer.add(1);                   // writing: consumer
+        consumer.add(2);
+    }
+
+    public static void main(String[] args) {
+        List<String> strings = new ArrayList<>();
+        List<Integer> ints = new ArrayList<>();
+        System.out.println(strings.getClass() == ints.getClass()); // true, both ArrayList
+
+        List<Number> numbers = new ArrayList<>();
+        addInts(numbers);
+        System.out.println(sum(numbers));  // 3.0
+    }
+}
+```
+
+Erasure has consequences that interviewers like to test:
+
+- `obj instanceof List<String>` does not compile. `obj instanceof List<?>` does.
+- You cannot write `new T()` or `new List<String>[10]`.
+- The compiler adds casts and bridge methods, so older code still runs on the same JVM.
+
+The main reason for erasure is compatibility. Generics arrived in Java 5, and code compiled before then had to keep running and linking against generic libraries, so the JVM kept one class per raw type. Erasure is not a memory optimisation.
+
+### When to use / pitfalls
+- A method that takes `List<Object>` does not accept a `List<String>`. Use a wildcard instead.
+- Heap pollution happens when a generic variable holds a value of the wrong type through a raw type. Avoid raw types.
+- Libraries that need the real type at runtime (for example, some JSON mappers) use a `Class<T>` or a `TypeReference` token to keep the type information.
+
+**See also:** [Generics (learning)](../../learning/02a-core-language/generics.md), [Core Java](core-java-part-2.md)
+
+</details>
+
+---
+
+## 20. How do you find and fix a performance bottleneck in a Java application?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Measure first, then change one thing at a time. Profile CPU, allocation, locks, and I/O to find the hot path. Fix the largest cost, measure again, and confirm the change helped. Common causes are GC pressure, lock contention, slow database access (including N+1 queries), and memory leaks.
+
+### Explanation
+A practical workflow:
+
+1. Reproduce the slowness with a realistic load, and record a baseline (latency percentiles, throughput, heap use).
+2. Profile. Java Flight Recorder (JFR) ships with the JDK and is safe enough for production. Sampling profilers such as async-profiler and commercial tools like JProfiler or YourKit show where time goes.
+3. Find the hot method or the wait point. A thread dump shows lock waits; a JFR recording shows allocation.
+4. Change one thing and re-measure.
+
+Microbenchmarks need JMH, because the JIT and dead-code elimination make naive timing unreliable:
+
+```java
+// Requires the JMH dependency and its annotation processor.
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Scope;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+@State(Scope.Benchmark)
+public class MapBench {
+    private final Map<String, Integer> map = new ConcurrentHashMap<>();
+
+    @Benchmark
+    public Integer incrementKey() {
+        return map.merge("key", 1, Integer::sum);
+    }
+}
+```
+
+Typical fixes:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Latency spikes at regular intervals | GC pauses | Check heap sizing, reduce allocation, consider a low-pause collector |
+| Many threads `BLOCKED` on one lock | Lock contention | Narrow the critical section, use a concurrent map or a lock-free counter |
+| Many small SQL queries per request | N+1 loading | Fetch the association in one query (for example, a `JOIN FETCH`) |
+| Heap grows after every full GC | Leak | Find the retaining path with a heap dump, remove the reference |
+
+### When to use / pitfalls
+- A "faster" change that you did not measure is a guess. Keep the baseline and compare.
+- Do not benchmark in a debugger or with a tiny input. The JIT needs warm-up time.
+- Often the slow part is the database or the network rather than the Java code. Check the query plan before rewriting Java.
+
+**See also:** [Concurrency](../../learning/02c-concurrency-io/locks-atomics.md), [Observability (metrics)](../../learning/20-observability/metrics.md), [Data and persistence](data-and-persistence-part-1.md)
+
+</details>
+
+---
+
 ## Quick recap
 
 - Use `Runnable` and executors; avoid creating threads by hand.

@@ -1,6 +1,6 @@
-# Data and Persistence Questions (Part 2 of 2)
+# Data and Persistence Questions (Part 2 of 4)
 
-Continued from [Part 1](data-and-persistence-part-1.md).
+Continued from [Part 1](data-and-persistence-part-1.md). Continue to [Part 3](data-and-persistence-part-3.md).
 
 ---
 

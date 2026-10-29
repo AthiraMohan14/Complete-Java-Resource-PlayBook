@@ -95,6 +95,79 @@ A service is ready to run in production when a team can answer these questions:
 
 Health checks deserve a note. Liveness should detect a broken process, and readiness can include dependencies, so that traffic stops reaching an instance that cannot serve it. The Spring Boot details are in [Actuator and API Documentation](../09-spring-boot/actuator-and-api-docs.md).
 
+### The twelve-factor app
+
+The twelve-factor method is a set of practices for building software-as-a-service applications that are portable and easy to run in the cloud. It was written by engineers at Heroku, and it still describes the habits that make cloud-native services easy to operate. Know the ideas, even if you do not recite the numbering.
+
+| Factor | Practice | What it looks like in Java |
+|---|---|---|
+| Codebase | One repository per service, many deploys | The same artefact runs in dev, test, and production |
+| Dependencies | Declare every dependency and isolate it | Maven or Gradle lists all libraries; no reliance on the server's libraries |
+| Config | Keep config out of the code and read it from the environment | Spring properties overridden by environment variables; no secrets in Git |
+| Backing services | Treat databases, queues, and caches as attached resources | Connection details come from configuration, so a service can swap providers |
+| Build, release, run | Separate the stages strictly | CI builds the artefact once; deployment combines it with config |
+| Processes | Stay stateless; keep state in backing services | Sessions in Redis; uploads in object storage |
+| Port binding | Export the service by binding a port | Embedded Tomcat or Netty serves HTTP directly |
+| Concurrency | Scale out with more processes | More pods or instances, not bigger threads |
+| Disposability | Start fast and stop gracefully | Graceful shutdown in Spring Boot lets in-flight requests finish |
+| Dev/prod parity | Keep environments as similar as possible | Local containers that match production's database version |
+| Logs | Write logs as a stream to standard output | The platform or a log agent collects and ships them |
+| Admin processes | Run one-off tasks as separate processes | Database migrations run as a job, not at application startup |
+
+Config deserves emphasis. Prefer configuration and conventions over code branches for environment differences, so the same binary behaves correctly everywhere. For secrets, see [Secrets management](../10-security/secrets-management.md).
+
+### Cloud service models and where data lives
+
+Cloud offerings are often grouped by how much of the stack the provider runs:
+
+- **IaaS** (infrastructure as a service): virtual machines, storage, and networks on demand. You manage the operating system and above.
+- **PaaS** (platform as a service): a ready runtime for deploying code; you manage the application and its data.
+- **SaaS** (software as a service): finished applications, used rather than built.
+- **BPaaS** (business process as a service): outsourced business processes delivered from the cloud, usually automated and shared across customers.
+
+For storage, the common AWS pair shows the trade-off. A managed relational database (RDS) suits transactional data with relationships, consistency needs, and complex queries. Object storage (S3) suits files, backups, logs, and static assets, where capacity and durability matter more than query power.
+
+| Need | Typical choice | Reason |
+|---|---|---|
+| Orders, accounts, inventory | Relational database | Transactions, constraints, and joins |
+| User-uploaded images or documents | Object storage | Cheap, large, and served by key |
+| Application logs at high volume | Object storage, or a log platform | Unstructured and retained for a period |
+| Database backups | Object storage | Durable and inexpensive over long retention |
+| Real-time analytics queries | A store built for analytics | Scans and aggregations across large data |
+
+In microservices, each service usually gets its own relational database, while object storage can be a shared resource for files, backups, and audit exports. Details of specific cloud services are in [AWS](../18-cloud/aws.md).
+
+### Deployment strategies
+
+Deployment strategies describe how a new version replaces an old one. They trade downtime, risk, cost, and rollback speed:
+
+- **Big bang**: stop the old version, deploy the new one. Simple and cheap, but downtime is visible and rollback is slow. Suits non-critical systems in quiet windows.
+- **Blue-green**: run two identical environments. Deploy to the idle one, check it, and switch traffic. Rollback means switching back. The cost is roughly double the infrastructure while both run.
+- **Canary**: send a small share of traffic, for example 5 percent, to the new version. Watch error rates and latency, then increase the share or roll back. Limits the blast radius of a bad release.
+- **Rolling**: replace instances in batches, so the service stays up while the pool changes. Kubernetes uses this as its default Deployment strategy, controlled by `maxSurge` and `maxUnavailable`.
+- **Shadow** (dark launch): copy live requests to the new version and discard its responses. It validates behaviour under real traffic at double cost. Shadow traffic must not trigger side effects such as charges or emails, so the new version needs a read-only path or a sandboxed dependency.
+
+```yaml
+# Rolling update settings on a Kubernetes Deployment
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # at most one extra pod during the rollout
+      maxUnavailable: 0    # never drop below the desired count
+```
+
+| Strategy | Downtime | Risk | Cost | Rollback | Typical use |
+|---|---|---|---|---|---|
+| Big bang | High | High | Low | Slow | Low-stakes systems during a quiet window |
+| Blue-green | None | Medium | About 2x while both run | Instant | Critical systems needing a fast switch |
+| Canary | None | Low | Near normal | Quick | High-traffic production services |
+| Rolling | None, with health checks | Low | Near normal | Quick | Stateless services on Kubernetes |
+| Shadow | None | Very low | About 2x during testing | Not needed | Validating a new version before users see it |
+
+Database changes complicate every strategy. Make schema changes backward compatible, deploy the code that tolerates both shapes, and only then remove the old shape. The pipeline side of this is covered in [CI/CD](../17-cicd/index.md).
+
 ## How it works / Step by step
 
 1. Identify business capabilities and bounded contexts from the domain.

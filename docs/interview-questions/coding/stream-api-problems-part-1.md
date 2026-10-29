@@ -452,5 +452,71 @@ class AverageAgeStats {
 
 ---
 
+## 9. How do you count the unique words in a text file using streams?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Read the file with `Files.lines`, split each line into words, drop empty tokens, and count the distinct words with `distinct().count()`. For a file that fits in memory, read it as one string and collect the words into a `Set`. Both approaches are linear in the number of words, and their extra memory grows with the number of distinct words.
+
+### Explanation
+Lowercase the text first, using `Locale.ROOT`, so that "The" and "the" count as one word. Split on runs of characters that are not letters or apostrophes, so punctuation disappears.
+
+**Approach 1: stream the file line by line.** Only one line is held at a time, plus the set of distinct words.
+
+**Approach 2: read the whole file, then collect into a set.** Simpler to follow, but the entire text is in memory.
+
+```java
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+public class UniqueWords {
+
+    // Approach 1: streaming, memory is one line plus the distinct words
+    static long countUniqueStreaming(Path file) throws IOException {
+        try (Stream<String> lines = Files.lines(file)) {
+            return lines
+                    .flatMap(line -> Arrays.stream(line.toLowerCase(Locale.ROOT).split("[^\\p{L}']+")))
+                    .filter(word -> !word.isEmpty())   // split can leave an empty first token
+                    .distinct()
+                    .count();
+        }
+    }
+
+    // Approach 2: whole file in memory, collected into a set
+    static long countUniqueInMemory(Path file) throws IOException {
+        String text = Files.readString(file).toLowerCase(Locale.ROOT);
+        Set<String> words = Pattern.compile("[^\\p{L}']+")
+                .splitAsStream(text)
+                .filter(word -> !word.isEmpty())
+                .collect(Collectors.toSet());
+        return words.size();
+    }
+}
+```
+
+**Complexity.** Let n be the number of characters, w the number of words, and u the number of distinct words. Both approaches read the file once and do one expected O(1) hash lookup per word, so the time is O(n) overall. Approach 1 uses O(u) extra memory plus one line at a time. Approach 2 uses O(n) memory for the text and O(u) for the set.
+
+### When to use / pitfalls
+- Prefer approach 1 for large files, because it never holds the whole file.
+- `Files.lines` holds an open file handle, so always close it with try-with-resources, as shown.
+- Decide what a "word" means before you write the regex. This one keeps contractions such as "don't" as one word and drops digits. Change the pattern if your definition differs.
+- Use `Locale.ROOT` for lowercasing. The default locale can change results, for example for Turkish dotted and dotless i.
+- `Files.readString` needs Java 11 or later.
+
+**See also:** [Java 8 lambdas and streams](../../learning/03a-modern-java/java8-lambdas-streams.md)
+
+</details>
+
+---
+
 
 **Next:** [Part 2](stream-api-problems-part-2.md)

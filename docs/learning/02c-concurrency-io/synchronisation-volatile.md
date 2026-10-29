@@ -191,6 +191,78 @@ Detection: take a thread dump with `jstack <pid>` or `jcmd <pid> Thread.print`. 
 
 An unlock happens before a later lock on the same monitor, and a write to a `volatile` field happens before a later read of that field. The JMM uses these edges to decide what a thread is guaranteed to see.
 
+### Other concurrency problems
+
+Race conditions and deadlocks are the classics, but three more failure modes come up in interviews:
+
+- **Livelock:** threads are active but make no progress, because each keeps reacting to the other. Two people stepping aside for each other in a hallway is the usual picture. Random back-off helps.
+- **Starvation:** a thread is repeatedly passed over for a lock or CPU time because others keep getting it first. Fair locks (`new ReentrantLock(true)`) reduce this at some cost in throughput.
+- **Priority inversion:** a high-priority thread waits for a lock held by a low-priority thread, which in turn cannot run because medium-priority threads keep it busy. Java does not solve this for you; keep critical sections short and avoid relying on thread priorities.
+
+### Coordination patterns
+
+Synchronisation is not only about protecting data. Threads also need to hand work to each other and wait for one another. Four patterns cover most cases.
+
+**1. Producer-consumer** with a `BlockingQueue`. The queue does the waiting: `put` blocks when the queue is full, and `take` blocks when it is empty.
+
+```java
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+
+public class ProducerConsumer {
+    private static final int POISON = -1;   // tells the consumer to stop
+
+    public static void main(String[] args) {
+        BlockingQueue<Integer> queue = new ArrayBlockingQueue<>(5);
+
+        Thread producer = new Thread(() -> {
+            try {
+                for (int i = 1; i <= 10; i++) {
+                    queue.put(i);            // waits while the queue is full
+                }
+                queue.put(POISON);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        Thread consumer = new Thread(() -> {
+            try {
+                while (true) {
+                    int item = queue.take(); // waits while the queue is empty
+                    if (item == POISON) {
+                        break;
+                    }
+                    System.out.println("consumed " + item);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        producer.start();
+        consumer.start();
+    }
+}
+```
+
+With several consumers, the producer must put one poison value for each of them.
+
+**2 to 4. Latch, barrier, and semaphore.** These three are coordination tools rather than data guards, and their full examples are in [Locks, Synchronisers, and Atomics](locks-atomics.md).
+
+| Pattern | Class | Use it when |
+|---|---|---|
+| Wait for N tasks to finish (one-shot) | `CountDownLatch` | A main thread must wait for setup or workers to complete |
+| Wait for N threads to reach a point (reusable) | `CyclicBarrier` | Threads work in phases and must align before each phase |
+| Limit how many threads use a resource | `Semaphore` | A pool of connections or licences has a fixed size |
+
+### Best practices
+
+1. **Keep critical sections small.** Lock only the state that needs protection, and never hold a lock during network or disk I/O.
+2. **Use one global lock order.** If a thread needs both A and B, every thread takes A then B.
+3. **Prefer `java.util.concurrent` types.** Queues, latches, and executors are already tested against the subtle cases.
+4. **Be deliberate about the monitor.** Lock a private `final` object, not `this` or a shared string, so unrelated code cannot take your lock.
+
 ## How it works / Step by step
 
 1. Thread A enters a `synchronized` block and acquires the monitor of the object.

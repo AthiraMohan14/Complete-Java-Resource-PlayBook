@@ -130,6 +130,31 @@ spec:
 ### Ingress and the Gateway API
 An **Ingress** routes external HTTP and HTTPS traffic to Services by host and path. It needs an ingress controller installed in the cluster to take effect. The **Gateway API** is the successor to Ingress for new work. It separates responsibilities more clearly and supports more protocols.
 
+## kubectl quick reference
+`kubectl` is the command-line client for the API server. Each command below reads or changes state through that API, so it obeys the same RBAC rules as any other client.
+
+| Command | Purpose |
+|---|---|
+| `kubectl get pods -n orders` | List objects of one kind in a namespace. Add `-o wide` for node and IP, or `-o yaml` for the full object. |
+| `kubectl describe pod orders-pod` | Show the object's spec, status, conditions, and recent events. Start here when a pod is stuck in Pending or CrashLoopBackOff. |
+| `kubectl logs orders-pod` | Print the container's stdout and stderr. Use `-f` to follow, `--previous` to read the logs of the last crashed container, and `-c` to pick a container in a multi-container pod. |
+| `kubectl exec -it orders-pod -- sh` | Run a command inside a running container. Use `sh` for images without bash. Avoid this for production debugging where possible; prefer logs and metrics. |
+| `kubectl port-forward svc/orders 8080:80` | Forward a local port to a Service or pod for testing, without exposing it publicly. |
+| `kubectl apply -f orders-deployment.yaml` | Create or update objects from a manifest. The command is repeatable, so the same file can be applied again. |
+| `kubectl delete -f orders-deployment.yaml` | Remove the objects described in a manifest. |
+| `kubectl rollout status deployment/orders` | Wait and report progress of a rolling update. Useful in CI scripts. |
+| `kubectl rollout history deployment/orders` | List the recorded revisions of a Deployment. |
+| `kubectl rollout undo deployment/orders` | Return to the previous revision. Add `--to-revision=N` to pick a specific one. |
+
+Typical debugging flow for a failing pod:
+
+```bash
+kubectl get pods -n orders -o wide        # Which pods, which nodes, what state
+kubectl describe pod orders-7d9f-abcde    # Events: scheduling, image pulls, probe failures
+kubectl logs orders-7d9f-abcde --previous # Output from the crashed container
+kubectl port-forward pod/orders-7d9f-abcde 8080:8080   # Test the endpoint locally
+```
+
 ## How it works / Step by step
 1. You run `kubectl apply` with a Deployment manifest. The API server validates it and stores it in etcd.
 2. The Deployment controller creates a ReplicaSet, which creates pods.

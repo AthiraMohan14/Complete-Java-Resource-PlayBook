@@ -4,6 +4,28 @@ Alerts tell a person that something needs action. Health checks tell an orchestr
 
 ## Core concepts
 
+### SLI, SLO, error budget, and SLA
+These four terms describe how reliability is measured and promised:
+
+- **SLI (service level indicator)**: a measured signal, usually a ratio of good events to valid events. Example: the share of HTTP requests that return a non-5xx response in under 300 ms.
+- **SLO (service level objective)**: the target for an SLI over a time window. Example: 99.9% of requests are good over 30 days.
+- **Error budget**: the allowed amount of failure, which is 100% minus the SLO. It is the room the team has to take risks, such as deploying or running experiments, before users are affected too often.
+- **SLA (service level agreement)**: a contract with customers that includes consequences, such as credits, if the promise is missed. An SLA is usually looser than the internal SLO, so the team sees trouble before the contract is breached.
+
+Worked example for an order API with a 99.9% SLO over 30 days:
+
+```text
+Valid requests in the window:  10,000,000
+Good requests (non-5xx, <300 ms): 9,995,000
+SLI = 9,995,000 / 10,000,000 = 99.95%          -> meets the 99.9% SLO
+
+Error budget = 100% - 99.9% = 0.1% of 10,000,000 = 10,000 allowed bad requests
+Bad requests so far = 10,000,000 - 9,995,000  = 5,000
+Budget consumed = 5,000 / 10,000 = 50%
+```
+
+Half the budget is already spent, so the team might slow risky releases until the window recovers. The budget turns a reliability target into a decision rule: release freely while budget remains, and focus on reliability work when it runs out.
+
 ### Alert on symptoms, not causes
 
 Alert on what users feel: high latency, failed requests, a missing feature. Causes such as high CPU are useful on dashboards, but an alert on CPU wakes someone up even when users are fine. A symptom alert usually ties to an SLO (service level objective), such as "99.9% of requests succeed over 30 days". Alerting on how fast the error budget is burning is a common approach, because it fires quickly for a severe incident and slowly for a minor one.

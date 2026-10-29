@@ -156,6 +156,72 @@ interface OrderSummaryRepository {
 
 Class-based (DTO) projections and dynamic projections are also supported. See [DTO Mapping](dto-mapping.md).
 
+### Saving and dirty checking
+
+`save` returns the entity that the persistence context manages. For a new entity it calls `persist`; for an existing one it calls `merge`, which can return a different object from the one you passed in. Always use the returned instance.
+
+For an entity you load inside a transaction, you often do not need `save` at all:
+
+```java
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class OrderStatusService {
+
+    private final OrderRepository orders;
+
+    public OrderStatusService(OrderRepository orders) {
+        this.orders = orders;
+    }
+
+    @Transactional
+    public void markShipped(Long id) {
+        Order order = orders.findById(id).orElseThrow();
+        order.setStatus("SHIPPED");   // no save(): dirty checking writes the UPDATE at commit
+    }
+}
+```
+
+The same method without `@Transactional` changes nothing in the database, because there is no commit that flushes the change. `OrderRepository` and `Order` are the types from earlier on this page, and `Order` is assumed to have a `setStatus` method.
+
+### Entity graphs and JPQL aggregates
+
+An entity graph names the associations to load with the query, which avoids the N+1 problem without writing a join by hand.
+
+```java
+import java.util.List;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface OrderGraphRepository extends JpaRepository<Order, Long> {
+
+    @EntityGraph(attributePaths = "lines")
+    List<Order> findByStatus(String status);
+}
+```
+
+For aggregates and joins, JPQL works the same way as HQL (Hibernate's superset):
+
+```java
+import java.math.BigDecimal;
+import java.util.List;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+public interface CustomerReportRepository extends JpaRepository<Customer, Long> {
+
+    @Query("select count(o) from Order o where o.status = :status")
+    long countOrdersWithStatus(@Param("status") String status);
+
+    @Query("select distinct c from Customer c join c.orders o where o.total > :amount")
+    List<Customer> customersWithOrdersOver(@Param("amount") BigDecimal amount);
+}
+```
+
+Do not combine a collection entity graph or a fetch join with a `Page` request. Hibernate then pages in memory and logs a warning, because the row count no longer matches the parent count.
+
 ## How it works / Step by step
 
 At application startup:

@@ -134,6 +134,67 @@ Never swallow an `InterruptedException` silently. Either rethrow it or restore t
 
 Virtual threads are lightweight threads scheduled by the JVM on a small pool of platform threads. Java 21 made them a final feature. They are useful when code spends most of its time waiting on I/O, because a blocked virtual thread does not hold an operating system thread. Create one with `Thread.ofVirtual().start(runnable)` or `Thread.startVirtualThread(runnable)`. The API is the same `Thread` class, so the code that runs inside is ordinary blocking Java code.
 
+### Why programs use threads
+
+- **Responsiveness:** a UI or request handler can stay available while a slow job runs on another thread.
+- **Hardware use:** on a multi-core machine, independent pieces of work can run at the same time.
+- **Simpler structure:** a server can give each connection its own thread of control, which is easier to read than hand-written state machines.
+
+### User threads and daemon threads
+
+Every thread is either a user thread or a daemon thread. The JVM uses this flag only to decide when it may exit.
+
+| | User thread | Daemon thread |
+|---|---|---|
+| JVM exit | Waits for every user thread to finish | Does not wait; it is abandoned when only daemon threads remain |
+| Typical use | Application work | Background housekeeping, such as a heartbeat or cache cleaner |
+| Default | Created by the application | A new thread inherits the daemon flag of the thread that created it |
+
+```java
+public class DaemonDemo {
+    public static void main(String[] args) {
+        Thread heartbeat = new Thread(() -> {
+            while (true) {
+                System.out.println("alive");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        });
+        heartbeat.setDaemon(true);   // must be called before start()
+        heartbeat.start();
+        // main returns here, so the JVM exits without waiting for heartbeat
+    }
+}
+```
+
+A daemon thread can be stopped at any point when the JVM exits, so never leave a file write or a transaction half done on one. Daemon status does not change scheduling priority; the two settings are independent.
+
+### Processes, threads, and IPC
+
+A process is a running program with its own address space. A thread lives inside a process and shares that process's memory with its sibling threads.
+
+| Aspect | Process | Thread |
+|---|---|---|
+| Memory | Separate, mostly isolated address space | Shares the heap and static fields of its process |
+| Cost to create and switch | Higher | Lower |
+| Sharing data | Needs IPC mechanisms | Shares objects directly, so it needs synchronisation |
+| Isolation | A failing process usually does not corrupt others | A bug that corrupts shared state affects every thread |
+
+Processes fall into two groups by how they relate to each other:
+
+- **Independent process:** it neither shares data nor resources with other processes, so other processes cannot change its results and it needs no IPC.
+- **Co-operating process:** it exchanges data or shares resources with other processes, so what those processes do can affect it. It needs IPC to pass data and to coordinate.
+
+Processes that cooperate must use inter-process communication (IPC). There are two basic models:
+
+1. **Shared memory:** the processes map a common region of memory and coordinate access to it, usually with a lock or semaphore.
+2. **Message passing:** the processes exchange discrete messages through a channel such as a pipe, socket, or queue.
+
+Files and network sockets are common everyday forms of message passing. Inside one JVM you do not need IPC, because threads already share memory. Use it when your Java program talks to a separate program, such as a database or a sidecar process on the same host. The `java.net` and `java.nio` packages cover the socket side (see [Networking](networking.md)).
+
 ## How it works / Step by step
 
 1. Create a `Thread` with a `Runnable` (or a lambda).

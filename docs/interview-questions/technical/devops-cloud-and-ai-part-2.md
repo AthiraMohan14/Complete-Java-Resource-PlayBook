@@ -252,6 +252,162 @@ Options include pgvector (inside PostgreSQL), Pinecone, Weaviate, Milvus, Chroma
 
 ---
 
+## 22. What is the difference between a Docker image and a container?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+An image is a read-only template: layers of files plus metadata such as the start command and exposed port. A container is a running instance started from an image, with a thin writable layer added on top. One image can start many containers, and running a container does not change the image.
+
+### Explanation
+Think of the image as a class and the container as an object. Build once, then start as many containers as the load requires:
+
+```bash
+docker build -t orders:1.4.1 .            # produces an immutable image
+docker run -d --name orders-a orders:1.4.1
+docker run -d --name orders-b orders:1.4.1   # second, independent container from the same image
+docker rm -f orders-a                     # its writable layer is discarded with it
+```
+
+Anything written inside a container disappears when the container is removed. Data that must survive belongs in a volume, and a changed configuration should produce a new image tag rather than an edited running container.
+
+### When to use / pitfalls
+- Do not treat a running container as the source of truth. Rebuild the image and redeploy instead of editing files inside a container.
+- Tag images with a version rather than `latest`, so you can tell which build is running.
+
+**See also:** [Docker fundamentals](../../learning/15-docker/docker-fundamentals.md)
+
+</details>
+
+---
+
+## 23. What is the difference between a Pod and a Deployment?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+A Pod is the smallest unit Kubernetes schedules: one or more containers that share a network namespace and can share volumes. A Deployment manages a ReplicaSet, which keeps a fixed number of identical Pods running, and it performs rolling updates and rollbacks. A bare Pod is not recreated if it is deleted or its node fails.
+
+### Explanation
+You rarely create Pods directly. You describe the desired state in a Deployment, and the controllers do the rest:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+        - name: orders
+          image: registry.example.com/orders:1.4.1
+          ports:
+            - containerPort: 8080
+```
+
+The hierarchy is Deployment, then ReplicaSet, then Pods. If a Pod crashes, the kubelet restarts its container according to the Pod's `restartPolicy`, but only the controller can replace a Pod that is gone. A standalone Pod is useful for a one-off debugging session. A StatefulSet fits workloads that need stable names and storage, such as a database.
+
+### When to use / pitfalls
+- A standalone Pod stays on a failed node and is never recreated. Use a Deployment for stateless services.
+- A Deployment with `replicas: 1` is not highly available. Scale to at least two replicas and spread them across nodes.
+
+**See also:** [Kubernetes architecture and objects](../../learning/16-kubernetes/kubernetes-architecture-objects.md)
+
+</details>
+
+---
+
+## 24. How does GitOps work, and how does Argo CD implement it?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+GitOps keeps the desired state of a cluster in a Git repository. Argo CD runs inside the cluster, compares the manifests in Git with the live objects, and reports any drift. It syncs the cluster to Git, either on demand or automatically, and with automated sync it can prune resources that were removed from Git and revert manual edits.
+
+### Explanation
+An Argo CD Application maps one Git path to one destination namespace:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orders
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/orders-config.git
+    targetRevision: main
+    path: overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: orders
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+A change reaches production by commit. CI builds the image, then a commit updates the image tag in the staging overlay. After review, the same tag is promoted to production by another commit. The benefits are an audit trail in Git, review before change, and a rollback that is a `git revert`. Because the cluster pulls its state, CI does not need cluster credentials.
+
+### When to use / pitfalls
+- Secrets must not be stored in plain text in Git. Use encrypted secrets or reference a vault.
+- Automated self-heal reverts manual hot fixes. Make the fix in Git first, or the controller removes it.
+
+**See also:** [Continuous deployment and IaC](../../learning/17-cicd/continuous-deployment-iac.md)
+
+</details>
+
+---
+
+## 25. How do you monitor an application running on Kubernetes?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Collect three kinds of signal. Metrics come from Micrometer endpoints and Kubernetes object state, scraped by Prometheus and shown in Grafana. Logs go to stdout as structured JSON, and a node-level agent ships them to a store such as OpenSearch or Loki. Traces come from OpenTelemetry-instrumented services and go to Jaeger or Tempo. Alert on user-facing symptoms and on platform failures such as restart loops.
+
+### Explanation
+Watch two layers. The platform layer covers pod restarts, pods that are not ready, replicas that differ from the desired count, and node memory or disk pressure. The application layer covers the RED signals (request rate, errors, latency) and JVM heap, GC, and connection pool use. Probes give the platform the health signals it needs:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  periodSeconds: 5
+```
+
+Use the same correlation or trace ID in every log line so that a log search leads to the matching trace.
+
+### When to use / pitfalls
+- Alerting on CPU alone misses user-facing failures. Alert on error rate and latency against the SLO.
+- Metric labels with unbounded values, such as request IDs, create too many time series.
+- Logs written to files inside the container are lost when the pod is replaced.
+
+**See also:** [Metrics](../../learning/20-observability/metrics.md), [Distributed tracing](../../learning/20-observability/distributed-tracing.md)
+
+</details>
+
+---
+
 ## Quick recap
 
 - Containers share the host kernel; use multi-stage builds, non-root users, and no secrets in images.
@@ -259,6 +415,8 @@ Options include pgvector (inside PostgreSQL), Pinecone, Weaviate, Milvus, Chroma
 - In Kubernetes, use Deployments for stateless services, separate liveness from readiness, and treat Secrets as sensitive.
 - Deploy with rolling, blue-green, canary, or shadow strategies, and make database changes compatible with both versions.
 - Observe with logs, metrics, and traces; alert on user-facing symptoms.
+- Images are immutable templates; containers and Pods are running instances. Deployments keep Pods running and roll them out.
+- GitOps tools such as Argo CD sync the cluster to a Git repository, so changes go through commits.
 - RAG needs good chunking, filtered retrieval, and validation of model output.
 
 **See also:** [Spring and security](spring-and-security-part-1.md), [Architecture and distributed systems](architecture-and-distributed.md), [Advanced Java and concurrency](advanced-java-concurrency-part-1.md)

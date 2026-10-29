@@ -82,9 +82,58 @@ For producer-consumer code between threads, the `java.util.concurrent` package p
 - Queue: breadth-first search, request buffering, task processing in arrival order.
 - Priority queue: Dijkstra's algorithm, scheduling, and finding the k largest items with a min-heap of size k.
 
+### Choosing a queue or stack
+
+| Need | Use | Why |
+|---|---|---|
+| FIFO queue | `ArrayDeque` | Constant-time at both ends, no per-node overhead |
+| LIFO stack | `ArrayDeque` with `push` and `pop` | Replaces the synchronized `Stack` |
+| Smallest or largest first | `PriorityQueue` | Heap gives O(log n) insert and removal of the head |
+| Thread hand-off between producers and consumers | `BlockingQueue` | Blocks when full or empty |
+| Queue that must hold `null` | `LinkedList` | `ArrayDeque` rejects `null` |
+
+### Breadth-first search with a queue
+Breadth-first search visits nodes level by level, and a FIFO queue gives that order. The `visited` set stops the search from looping on cycles.
+
+```java
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public class BreadthFirst {
+    public static void main(String[] args) {
+        Map<String, List<String>> graph = Map.of(
+            "A", List.of("B", "C"),
+            "B", List.of("D"),
+            "C", List.of("D"),
+            "D", List.of());
+
+        Set<String> visited = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.offer("A");
+        visited.add("A");
+
+        while (!queue.isEmpty()) {
+            String node = queue.poll();
+            System.out.println(node);          // A, B, C, D
+            for (String next : graph.get(node)) {
+                if (visited.add(next)) {       // true only the first time
+                    queue.offer(next);
+                }
+            }
+        }
+    }
+}
+```
+
+Swapping the queue for a stack (`push` and `pop`) changes the traversal to a depth-first style, so the two structures differ by which end you remove from.
+
 ## How it works / Step by step
 
-1. `ArrayDeque.offerLast` writes at the tail index and advances it; when full, it doubles the array and copies.
+1. `ArrayDeque.offerLast writes at the tail index and advances it; when full, it doubles the array and copies.
 2. `ArrayDeque.push` and `offerFirst` move the head index backward in the circular array.
 3. `PriorityQueue.offer` appends to the array and sifts the new element up until the heap property holds.
 4. `PriorityQueue.poll` removes the root, moves the last element to the root, and sifts it down.

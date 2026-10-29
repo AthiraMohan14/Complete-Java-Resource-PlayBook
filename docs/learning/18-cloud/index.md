@@ -21,3 +21,14 @@ The main Google Cloud service families, with notes on naming changes such as Dat
 ### [Multi-Cloud Considerations](multi-cloud.md)
 **vendor lock-in - portability - hybrid cloud - data residency - cost comparison**
 Why organisations use more than one cloud, what it costs them in complexity, and how to keep applications portable.
+
+### More in this section
+
+### [Compute and Storage on AWS: EC2, Lambda, and S3](compute-and-storage.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Compute and storage are where most AWS design questions start: which machine runs the code, how it is launched and reached, and where the data lives. This page goes deeper on...
+
+### [AWS Identity and Access Management (IAM) Basics](iam-and-security-basics.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+IAM decides who, or what, may perform which actions on which AWS resources. Interviewers ask about it because most cloud incidents trace back to over-broad permissions,...
+

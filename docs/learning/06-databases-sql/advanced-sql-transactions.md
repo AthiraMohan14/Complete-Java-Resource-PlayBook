@@ -102,6 +102,18 @@ COMMIT;
 | Isolation | Concurrent transactions do not see each other's partial work, to the degree the isolation level allows |
 | Durability | Committed data survives a crash (typically through a write-ahead log) |
 
+### BASE and the CAP theorem
+
+Many distributed NoSQL systems give up some of ACID's strictness to gain availability and scale. The informal name for that trade-off is BASE:
+
+- **Basically available:** the system keeps answering when some nodes fail, possibly with partial or stale data.
+- **Soft state:** a replica's contents can change over time even without new client writes, because it is still catching up.
+- **Eventual consistency:** once writes stop and updates propagate, all replicas converge to the same value.
+
+The CAP theorem covers the moment a network partition splits the nodes. During a partition, a system must choose between **consistency** (every read returns the latest write, or fails) and **availability** (every request gets a non-error response, which may be stale). Partition tolerance is not a choice in a distributed system, because networks do fail. A CP system refuses some requests to stay consistent; an AP system answers and reconciles later.
+
+CAP is often misquoted as "pick any two of three, always." It describes behaviour during a partition only. PACELC extends it: when there is no partition, the system still trades latency against consistency. A single-node relational database avoids the distributed trade-off, which is why it can offer full ACID transactions.
+
 ### Isolation levels and anomalies
 
 Concurrent transactions can cause anomalies:
@@ -157,6 +169,7 @@ Handling a concurrent update safely:
 - Forgetting that auto-commit is on in many drivers, so each statement commits on its own.
 - Not retrying deadlock errors.
 - Using `LAST_VALUE` without a full frame clause.
+- Treating CAP as "choose two of three at all times". It applies during partitions; PACELC covers the normal case.
 
 !!! tip "Interview tip"
     **Q: How would you prevent two customers from buying the last item?**

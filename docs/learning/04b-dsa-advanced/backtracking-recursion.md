@@ -50,6 +50,28 @@ public class TailSum {
 
 When recursion depth can be large (for example, a linked list of a million nodes), convert to an explicit loop or an explicit `Deque` used as a stack.
 
+### Warm-up: recursion without a loop
+
+Recursion can replace a counting loop when the base case is clear. The call on `n - 1` finishes before the current level prints, so the output runs from 1 up to `n`.
+
+```java
+public class CountUp {
+    static void printUpTo(int n) {
+        if (n <= 0) {                // base case: nothing left to print
+            return;
+        }
+        printUpTo(n - 1);            // smaller problem first
+        System.out.print(n + " ");   // then this level's work
+    }
+
+    public static void main(String[] args) {
+        printUpTo(5);                // prints: 1 2 3 4 5
+    }
+}
+```
+
+Interviewers use this to check the base case and the order of work. Moving the print before the recursive call reverses the output.
+
 ### Backtracking: choose, explore, un-choose
 
 The template for backtracking has three steps inside a loop over choices:

@@ -1,6 +1,6 @@
-# Core Java Questions (Part 2 of 2)
+# Core Java Questions (Part 2 of 3)
 
-Continued from [Part 1](core-java-part-1.md).
+Continued from [Part 1](core-java-part-1.md). Continues in [Part 3](core-java-part-3.md).
 
 ---
 

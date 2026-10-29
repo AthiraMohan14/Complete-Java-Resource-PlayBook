@@ -73,7 +73,7 @@ The main levers are conceptual, and the details change over time:
 - **Right-sizing** matches instance and database sizes to measured usage.
 - Stopping or deleting unused resources, and tagging resources to see who owns them.
 
-Check current AWS pricing documentation before making any cost decision.
+Check current AWS pricing documentation before making any cost decision. Set billing alerts, so that unexpected spend is noticed in days rather than at the end of the month.
 
 ### Choosing a compute option
 
@@ -116,6 +116,82 @@ Most designs rely on security groups, which reference other groups rather than I
 
 ### Secrets and configuration
 Store database passwords and API keys in a managed secrets service, and grant the application's role permission to read only the secrets it needs. Reference them at runtime rather than copying them into environment files. Rotate them on a schedule, and make the application reload or restart cleanly when rotation happens.
+
+### Global infrastructure
+A **Region** is a geographic area, such as a country or a cluster of cities, and most services are scoped to one Region. Choose a Region by compliance and data-residency rules, proximity to users, which services it offers, and price.
+
+Each Region has several **Availability Zones** (AZs), which are separate data-centre groups with independent power, cooling, and networking. Zones are linked by fast, low-latency connections, so a design can survive one zone failing. AWS documents that a Region has at least three AZs. **Edge locations** sit in many more cities and serve cached content through CloudFront, which brings responses closer to users without changing the Region that holds the data.
+
+### Managed databases: RDS and DynamoDB
+**RDS** runs managed relational engines. The main choices are:
+
+- **Single-AZ**: one instance, with no automatic failover.
+- **Multi-AZ**: a standby in another zone takes over automatically if the primary fails. The standby is for availability, not for scaling reads.
+- **Read replicas**: asynchronous copies that offload read traffic. They can live in the same Region or another one, and replication lag means they can serve slightly old data.
+
+RDS takes automated daily backups with a retention period of up to 35 days, and supports manual snapshots and point-in-time restore within the backup window. Encryption at rest uses AWS KMS and in-transit uses TLS. Place the instance in a DB subnet group inside private subnets, control access with security groups, and use IAM database authentication where the engine supports it, so that no password sits in code. The trade-off is less control over the operating system and some engine settings.
+
+**DynamoDB** is a fully managed key-value and document database. A table holds items, and each item has a partition key and an optional sort key. Access by key is fast and predictable; a scan reads the whole table and gets expensive as the table grows.
+
+- **Capacity**: on-demand mode bills per request and suits unpredictable traffic. Provisioned mode bills for reserved read and write capacity units. One read capacity unit reads up to 4 KB strongly consistent, or two eventually consistent reads per second. One write capacity unit writes up to 1 KB per second.
+- **Queries and scans**: use `Query` with the partition key, optionally narrowed by a sort-key condition. Use `Scan` only for rare full-table jobs.
+- **Global tables** replicate a table across Regions, so you can read and write locally, with eventual consistency between Regions.
+- **TTL** deletes items after a time stored as a Unix epoch timestamp in a chosen attribute. Deletion happens in the background and can lag, so filter expired items in queries if it matters.
+
+```java
+import java.time.Instant;
+import java.util.Map;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
+
+public class SessionStore {
+
+    public static void main(String[] args) {
+        try (DynamoDbClient ddb = DynamoDbClient.create()) {
+            long expiresAt = Instant.now().plusSeconds(86_400).getEpochSecond();
+            ddb.putItem(PutItemRequest.builder()
+                .tableName("sessions")
+                .item(Map.of(
+                    "userId", AttributeValue.fromS("12345"),
+                    "sessionId", AttributeValue.fromS("abc"),
+                    "expiresAt", AttributeValue.fromN(String.valueOf(expiresAt))))
+                .build());
+
+            ddb.query(QueryRequest.builder()
+                .tableName("sessions")
+                .keyConditionExpression("userId = :uid")
+                .expressionAttributeValues(Map.of(":uid", AttributeValue.fromS("12345")))
+                .build());
+        }
+    }
+}
+```
+
+### VPC layout
+A **VPC** (Virtual Private Cloud) is your isolated network inside a Region. You give it an IP range in CIDR notation, such as `10.0.0.0/16`, and divide that range into subnets. Each subnet lives in one AZ.
+
+- A **public subnet** has a route to an **internet gateway**, so resources with public addresses can be reached from outside.
+- A **private subnet** has no direct route to the internet. Its outbound traffic goes through a **NAT gateway** in a public subnet, which allows connections out but not unsolicited connections in. The NAT gateway needs an Elastic IP address.
+- A **route table** decides where each subnet's traffic goes. The `local` route keeps traffic inside the VPC, a `0.0.0.0/0` route to the internet gateway serves public subnets, and a route to a VPN or Transit Gateway reaches an on-premises network.
+- **VPC peering** connects two VPCs privately. The CIDR ranges must not overlap, and peering is not transitive: if A peers with B and B peers with C, A cannot reach C through B.
+
+Example route table for a public subnet:
+
+```
+Destination     Target
+10.0.0.0/16     local
+0.0.0.0/0       igw-<id>
+```
+
+Security groups and network ACLs both filter traffic, as described earlier in this page.
+
+### Edge and supporting services
+- **CloudFront** is a CDN that caches content at edge locations. Its origins include S3 buckets and load balancers, and AWS Shield Standard protection is included.
+- **ElastiCache** is a managed in-memory service running Redis or Memcached. It reduces load on the database and suits sessions, leaderboards, and short-lived data. See [Redis Advanced Patterns](../12-caching-performance/redis-advanced-patterns.md) for the Redis side.
+- **AWS X-Ray** traces requests across services, which shows where latency comes from in a distributed call chain.
+- **Auto Scaling** adds and removes instances against a metric, and pairs with load balancer health checks, as described in the auto scaling section above.
 
 ## How it works / Step by step
 A typical three-tier application on AWS:

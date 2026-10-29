@@ -124,6 +124,83 @@ The **OWASP Top 10** lists the most critical web application risk categories. Th
 
 OWASP also publishes a dedicated API Security Top 10, which is worth reading for API-specific risks.
 
+## Authentication methods compared
+
+Each method trades statelessness, revocation, and effort against each other. The table compares the common ones.
+
+| Method | Stateless | Revocation | Typical use | Main risk |
+|---|---|---|---|---|
+| Basic auth | Yes | Only by changing the password | Internal tools, scripts | Credentials on every request; needs TLS |
+| API key | Yes | Rotate or disable the key | Identifying third-party apps | Long-lived; a leak exposes everything it can reach |
+| Session cookie | No; the server stores the session | Immediate | Server-rendered web apps | CSRF; sharing sessions across instances |
+| JWT bearer | Yes | Deny-list or short lifetime | SPAs, mobile apps, microservices | Hard to revoke; a leaked token works until expiry |
+| OAuth 2.0 access token | Yes | Revoke at the authorisation server | Delegated access, partner integrations | Misconfigured redirects and grant types |
+| OpenID Connect | Yes for the ID token's claims | Depends on the provider | User login and single sign-on | Using an ID token as an API credential |
+| Mutual TLS | Yes | Certificate revocation and rotation | Service-to-service calls | Certificate management effort |
+
+Basic auth cannot log a user out, because the client resends the password each time. Keep API keys out of URLs, where they land in logs, and store only a hash on the server. Use mutual TLS for strong service-to-service identity, where the certificate lifecycle is managed.
+
+## Single sign-on
+
+Single sign-on lets a user log in once and then reach several applications without logging in again. Here is the usual flow:
+
+1. The user opens application A, which has no session.
+2. A redirects the browser to the identity provider.
+3. The user signs in there.
+4. The provider redirects back to A with a code or token, and A creates its own session.
+5. The user opens application B, which redirects to the same provider.
+6. The provider already knows the user, so B gets a token without a new login prompt.
+
+Common protocols are SAML 2.0 (XML assertions, common in enterprises), OpenID Connect (JSON tokens on top of OAuth 2.0, common in newer systems), and Kerberos (common in Windows domains).
+
+In Spring Boot, OIDC login is configured under `spring.security.oauth2.client`:
+
+```yaml
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          corporate:
+            client-id: ${OIDC_CLIENT_ID}
+            client-secret: ${OIDC_CLIENT_SECRET}
+            scope:
+              - openid
+              - profile
+              - email
+        provider:
+          corporate:
+            issuer-uri: https://login.example.com/realms/corp
+```
+
+Enable login with `oauth2Login(Customizer.withDefaults())` in the filter chain. The full setup is covered in [Authentication: JWT, OAuth 2.0, and OpenID Connect](../10-security/authentication-jwt-oauth.md).
+
+## Authorisation strategies
+
+- **Role-based access control (RBAC)** grants permissions through roles. Users hold roles, and roles hold permissions, such as read or write on a resource. It is simple to explain and audit, and it is the default choice (see [Spring Security Authorisation](../10-security/spring-security-authorisation.md)).
+- **Attribute-based access control (ABAC)** decides from attributes of the user, the resource, and the context. It handles rules such as "same department, during business hours", but the policies are harder to test and explain.
+
+```text
+allow when user.department == resource.owningDepartment
+      and request time is within business hours
+```
+
+- **OAuth 2.0 scopes** limit what a token may do. A token with `orders:read` can read orders but cannot change them, whatever the user's roles are:
+
+```text
+scope=orders:read payments:write
+```
+
+## Authentication and authorisation compared
+
+| | Authentication | Authorisation |
+|---|---|---|
+| Question answered | Who is this? | What may this caller do? |
+| Order | First | After authentication |
+| Evidence used | Password, certificate, signed token | Roles, scopes, ownership, attributes |
+| Token type | ID token (OIDC) identifies the user | Access token authorises calls |
+| Failure response | `401 Unauthorized` | `403 Forbidden` |
+
 ## How it works
 
 1. A client obtains a token from an identity provider (OAuth 2.0 / OIDC) or uses an API key.

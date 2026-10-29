@@ -142,6 +142,139 @@ class ServerErrorHandler {
 
 In production, use the trace ID from the tracing library rather than a random UUID, so the reference links directly to the trace. Tests for these responses fit the MockMvc approach in [API Testing and Code Coverage](../11-testing/api-testing-and-coverage.md).
 
+### A base exception that carries its HTTP status
+
+Throwing a domain exception from deep in the service layer should not require the service to know about HTTP. A common middle ground is an abstract base exception that stores the status it should map to. The advice class then needs one handler for the whole family, and each subclass only decides its status.
+
+```java
+import org.springframework.http.HttpStatus;
+
+abstract class ApiException extends RuntimeException {
+
+    private final HttpStatus status;
+
+    protected ApiException(HttpStatus status, String message) {
+        super(message);
+        this.status = status;
+    }
+
+    HttpStatus status() {
+        return status;
+    }
+}
+
+class MissingOrderException extends ApiException {
+    MissingOrderException(long orderId) {
+        super(HttpStatus.NOT_FOUND, "Order " + orderId + " was not found");
+    }
+}
+
+class PaymentDeclinedException extends ApiException {
+    PaymentDeclinedException(String reason) {
+        super(HttpStatus.PAYMENT_REQUIRED, "Payment declined: " + reason);
+    }
+}
+```
+
+```java
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+@RestControllerAdvice
+class ApiExceptionAdvice {
+
+    @ExceptionHandler(ApiException.class)
+    ResponseEntity<ProblemDetail> handle(ApiException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.status(), ex.getMessage());
+        return ResponseEntity.status(ex.status()).body(problem);
+    }
+}
+```
+
+The status is set in one place, next to the exception that knows what went wrong. A simpler alternative is `@ResponseStatus` on the exception class itself, but that gives you no way to read the status in code, such as for logging.
+
+### @ExceptionHandler on a single controller
+
+A handler method inside a controller applies only to that controller's requests. Use it for an error that only one endpoint produces, and keep it out of the global advice so the global mapping stays small.
+
+```java
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+record RefundRequest(String orderId, long cents) { }
+
+class RefundLimitExceededException extends RuntimeException {
+    RefundLimitExceededException(long cents) {
+        super("Refund of " + cents + " exceeds the allowed limit");
+    }
+}
+
+@RestController
+@RequestMapping("/api/refunds")
+class RefundController {
+
+    @PostMapping
+    String create(@RequestBody RefundRequest request) {
+        if (request.cents() > 100_000) {
+            throw new RefundLimitExceededException(request.cents());
+        }
+        return "accepted";
+    }
+
+    // Applies only to RefundController. Other controllers never reach it.
+    @ExceptionHandler(RefundLimitExceededException.class)
+    ProblemDetail limitExceeded(RefundLimitExceededException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+}
+```
+
+When a controller and an advice both handle the same exception type, the controller's method wins. The advice is consulted only for exceptions the controller does not handle. Use this ordering on purpose: put the endpoint-specific wording in the controller and the general rule in the advice.
+
+### An error DTO with custom fields
+
+`ProblemDetail` covers the RFC 9457 fields, and you can add more with `setProperty`. Some teams already have a client that expects its own error shape, though, and then a plain record is simpler to keep stable. Here the record includes a timestamp, the request path, and optional field errors. Empty field errors are left out of the JSON.
+
+```java
+import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.servlet.http.HttpServletRequest;
+import java.time.Instant;
+import java.util.Map;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+record ApiError(
+        int status,
+        String message,
+        Instant timestamp,
+        String path,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, String> fieldErrors) {
+}
+
+@RestControllerAdvice
+class LegacyShapeAdvice {
+
+    @ExceptionHandler(MissingOrderException.class)
+    ResponseEntity<ApiError> notFound(MissingOrderException ex, HttpServletRequest request) {
+        ApiError body = new ApiError(HttpStatus.NOT_FOUND.value(), ex.getMessage(),
+                Instant.now(), request.getRequestURI(), Map.of());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+}
+```
+
+Choose one error shape for the whole API and document it. A new API should normally start with `ProblemDetail`, because clients and tooling already understand it. Use a custom DTO when a fixed contract must be kept.
+
 ## How it works / Step by step
 
 1. A controller or service throws an exception.

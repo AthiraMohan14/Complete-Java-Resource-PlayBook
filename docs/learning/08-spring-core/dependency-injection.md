@@ -123,6 +123,62 @@ class Checkout {
 
 `@Primary` sets a default. `@Qualifier` picks a specific bean at the injection point. Use `@Qualifier` for explicit choices and `@Primary` for the common default.
 
+### Custom qualifiers with a meta-annotation
+
+Repeating `@Qualifier("bankGateway")` with string literals across many classes is easy to get wrong. A custom qualifier gives the choice a name, and the injection point reads as a domain term. You create an annotation and mark it with `@Qualifier`, which makes it a qualifier in its own right. Spring compares its attributes with the annotation on each candidate bean.
+
+```java
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+import org.springframework.beans.factory.annotation.Qualifier;
+
+@Target({ElementType.TYPE, ElementType.FIELD, ElementType.PARAMETER, ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Qualifier
+public @interface Channel {
+    String value();
+}
+```
+
+The candidates carry the same annotation, and the injection point asks for it:
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+public interface Notifier {
+    void send(String recipient, String message);
+}
+
+@Service
+@Channel("email")
+class EmailNotifier implements Notifier {
+    public void send(String recipient, String message) { }
+}
+
+@Service
+@Channel("sms")
+class SmsNotifier implements Notifier {
+    public void send(String recipient, String message) { }
+}
+
+@Service
+class ReminderService {
+
+    private final Notifier notifier;
+
+    ReminderService(@Channel("sms") Notifier notifier) {   // picks SmsNotifier
+        this.notifier = notifier;
+    }
+}
+```
+
+A misspelt value such as `@Channel("smss")` fails at startup with a "no qualifying bean" error, which is better than a silent wrong choice. To avoid repeating literals, keep the values in a constants class and write `@Channel(Channels.SMS)`. For a marker with no value, such as "the cached implementation", declare the annotation without a `value` element and match on the annotation alone.
+
 ### Collections and optional dependencies
 
 Spring injects all beans of a type as a `List`, `Set`, or `Map` (keyed by bean name). This is useful for strategy patterns.
@@ -167,6 +223,39 @@ Fix the design rather than enabling the flag:
 - Move one of the calls to an event: publish a Spring application event and let the other bean listen.
 - Pass a function or callback instead of the whole bean.
 - Use `@Lazy` on one injection point as a last resort. It defers creation with a proxy and hides the design problem.
+
+The event approach is the cleanest of these. The publisher does not know who listens, so the dependency points one way only:
+
+```java
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
+
+record OrderPlaced(String orderId) { }
+
+@Service
+class OrderPlacement {
+
+    private final ApplicationEventPublisher events;
+
+    OrderPlacement(ApplicationEventPublisher events) {
+        this.events = events;
+    }
+
+    void place(String orderId) {
+        events.publishEvent(new OrderPlaced(orderId));   // no reference to the listener
+    }
+}
+
+@Service
+class LoyaltyPoints {
+
+    @EventListener
+    void onOrderPlaced(OrderPlaced event) {
+        // award points; OrderPlacement never depends on this class
+    }
+}
+```
 
 Circular dependencies are usually a sign that two classes have too much responsibility in common.
 

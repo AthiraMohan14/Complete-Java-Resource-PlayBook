@@ -56,6 +56,133 @@ A **service mesh** adds a layer for service-to-service traffic, usually by injec
 
 A mesh adds operational complexity and resource overhead. Adopt it when the features are needed, not by default.
 
+#### How Istio is built
+Istio has two parts. The **control plane** (`istiod`) turns Istio resources into configuration and pushes it to each proxy over the xDS protocol. It also acts as a certificate authority, issuing identities to workloads for mTLS. The **data plane** is an Envoy sidecar injected next to each pod. The sidecar intercepts the pod's inbound and outbound traffic and applies the rules it received.
+
+Enable injection per namespace, then restart the pods so the sidecar is added:
+
+```bash
+istioctl install --set profile=demo -y        # demo profile for evaluation; choose a production profile deliberately
+kubectl label namespace orders istio-injection=enabled
+kubectl rollout restart deployment -n orders
+```
+
+#### Traffic management with VirtualService and DestinationRule
+A **DestinationRule** names the versions of a service (subsets), selected by pod labels, and sets connection and outlier policies. A **VirtualService** decides how requests to a host are routed to those subsets. Together they implement canary releases without changing the application:
+
+```yaml
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: orders
+spec:
+  host: orders
+  subsets:
+    - name: stable
+      labels:
+        version: "1.3.0"
+    - name: canary
+      labels:
+        version: "1.4.0"
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: orders
+spec:
+  hosts:
+    - orders
+  http:
+    - route:
+        - destination:
+            host: orders
+            subset: stable
+          weight: 90
+        - destination:
+            host: orders
+            subset: canary
+          weight: 10
+```
+
+Raising the canary weight step by step (for example 10, 25, 50, 100) is the progressive rollout. Route rules can also match on headers, which lets you send internal testers to the new version first.
+
+#### Timeouts, retries, and outlier detection
+A VirtualService sets a request timeout and retry policy. A DestinationRule can eject unhealthy pod instances from the load-balancing pool, which acts as a circuit breaker:
+
+```yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: orders
+spec:
+  hosts:
+    - orders
+  http:
+    - timeout: 5s
+      retries:
+        attempts: 2
+        perTryTimeout: 2s
+        retryOn: 5xx,connect-failure,reset
+      route:
+        - destination:
+            host: orders
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: orders
+spec:
+  host: orders
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5    # field names vary by Istio version; check the reference for yours
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+```
+
+Retries multiply load during an outage, and retrying a non-idempotent call such as a payment can charge a customer twice. Retry only operations that are safe to repeat.
+
+#### Mutual TLS and authorization
+A PeerAuthentication policy in `STRICT` mode accepts only mTLS traffic. An AuthorizationPolicy then limits which service identities may call which paths, using the service account names that the mesh issued:
+
+```yaml
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: orders
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: orders-from-gateway
+  namespace: orders
+spec:
+  selector:
+    matchLabels:
+      app: orders
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/edge/sa/gateway"]
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+            paths: ["/api/*"]
+```
+
+Switch to `STRICT` only after every client in the namespace has a sidecar. Otherwise plain-text callers are rejected and traffic breaks.
+
+#### Observability from the mesh
+Each sidecar reports request metrics, such as `istio_requests_total`, labelled by source and destination. Traces need the application to forward the trace headers, because the sidecar cannot join spans that the application drops. Kiali draws the service graph from the same telemetry, and Jaeger shows traces. Access them with `kubectl port-forward` in a test cluster.
+
+#### Istio or Linkerd
+Istio offers the widest feature set, including detailed traffic shaping and authorization, at the cost of more components and more memory. Linkerd is smaller and simpler, and it covers mTLS, retries, and metrics with fewer knobs. Choose Istio when you need its traffic and policy features, and Linkerd when you mainly want mTLS and observability with little operational effort.
+
 ### Helm: packaging and templating
 **Helm** packages Kubernetes manifests as a **chart**. A chart has a `Chart.yaml` with metadata, a `values.yaml` with default settings, and `templates/` containing manifests with placeholders.
 
@@ -86,6 +213,77 @@ Common commands:
 - `helm template ./orders-chart` renders the manifests without applying them, which is useful in CI.
 
 Helm tracks releases and their revisions in the cluster, so rollbacks are one command away.
+
+#### Chart layout and template helpers
+A typical chart looks like this:
+
+```text
+orders-chart/
+├── Chart.yaml          # name, chart version, appVersion
+├── values.yaml         # defaults
+├── values-prod.yaml    # environment overrides
+├── charts/             # dependency charts
+└── templates/
+    ├── _helpers.tpl    # named templates shared across files
+    ├── deployment.yaml
+    ├── service.yaml
+    └── migrate-job.yaml
+```
+
+Named templates in `_helpers.tpl` keep labels consistent across every manifest:
+
+```yaml
+# templates/_helpers.tpl
+{{- define "orders.labels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end -}}
+```
+
+```yaml
+# templates/deployment.yaml (excerpt)
+metadata:
+  name: {{ .Release.Name }}-orders
+  labels:
+    {{- include "orders.labels" . | nindent 4 }}
+```
+
+Values files are merged in order, and later files win. A flag such as `--set image.tag=1.4.1` overrides both. Put non-secret settings in values. Reference Secrets by name instead of storing passwords in `values.yaml`, because values are visible to anyone who can read the release.
+
+#### Hooks for migrations
+A hook is a resource that Helm runs at a point in the release lifecycle. A pre-upgrade Job is a common way to run database migrations before the new pods start:
+
+```yaml
+# templates/migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "orders-service:{{ .Values.image.tag }}"
+          command: ["sh", "-c", "./migrate.sh"]   # a command that applies schema changes
+```
+
+The hook types are `pre-install`, `post-install`, `pre-upgrade`, `post-upgrade`, `pre-delete`, `post-delete`, `pre-rollback`, `post-rollback`, and `test`. Hook weights order hooks of the same type, and the delete policy removes old hook Jobs.
+
+Useful checks before a release:
+
+- `helm lint ./orders-chart` finds template and metadata errors.
+- `helm template ./orders-chart -f values-prod.yaml` renders the manifests locally, so CI can review them.
+- `helm install orders ./orders-chart --dry-run --debug` asks the cluster to validate the release without creating anything.
+- `helm history orders` lists the revisions that `helm rollback` can return to.
+
+A rollback restores manifests, but it does not reverse a database migration. Write migrations so the previous application version still works against the new schema.
 
 ### Custom Resource Definitions (CRDs)
 A **CustomResourceDefinition** adds a new resource type to the Kubernetes API, such as `Database` or `Certificate`. Once installed, you create and read those objects with `kubectl` like any built-in object, and they are stored in etcd.
@@ -144,7 +342,8 @@ Real operators run this loop against the API server, triggered by watch events, 
 ## Quick recap
 - Pods reach each other by IP; applications use Service DNS names instead.
 - NetworkPolicies restrict traffic, but only where the network plugin enforces them.
-- Service meshes add mTLS, retries, and traffic splitting at the cost of complexity.
+- Service meshes add mTLS, retries, and traffic splitting at the cost of complexity; Istio does weighted canary routing with VirtualService and DestinationRule.
+- Helm hooks run migrations before an upgrade, but a rollback does not undo them.
 - Helm packages manifests as charts with values and tracked, rollback-able releases.
 - CRDs add API types; operators reconcile them toward the desired state.
 

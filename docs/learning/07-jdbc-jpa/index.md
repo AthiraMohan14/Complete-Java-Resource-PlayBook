@@ -25,3 +25,10 @@ Keeping entities out of the API, compile-time versus reflection-based mapping, a
 ### [Database Migrations](database-migrations.md)
 **Flyway - Liquibase - versioned changes - expand and contract - testing**
 Versioned schema changes, tool choice, rollback strategies, and migration testing.
+
+### More in this section
+
+### [MyBatis and JPA: Choosing a Persistence Style](mybatis-and-jpa-comparison.md)
+**Core concepts - JPA versus MyBatis - Using both in one application - How it works / Step by step - Common pitfalls**
+MyBatis is an SQL mapper: you write the SQL, and it binds parameters and maps result columns to objects. JPA maps objects to tables and generates the SQL for you. Interviewers...
+

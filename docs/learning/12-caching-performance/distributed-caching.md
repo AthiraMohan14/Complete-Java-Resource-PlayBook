@@ -67,6 +67,49 @@ The cache now holds stale data until the TTL expires. Mitigations:
 
 Transactional events are a common approach (see [Event-Driven Architecture](../13-messaging/event-driven-architecture.md)).
 
+### Explicit refresh endpoint
+Sometimes a TTL is too slow and an event pipeline is too much work, for example after a bad data load or a price correction. An operator can then trigger invalidation with an admin endpoint. The endpoint clears one named cache, so the blast radius is known:
+
+```java
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/admin/caches")
+class CacheRefreshController {
+
+    private final CacheManager cacheManager;
+
+    CacheRefreshController(CacheManager cacheManager) {
+        this.cacheManager = cacheManager;
+    }
+
+    @PostMapping("/{cacheName}/refresh")
+    @PreAuthorize("hasRole('ADMIN')")
+    ResponseEntity<Void> refresh(@PathVariable String cacheName) {
+        Cache cache = cacheManager.getCache(cacheName);
+        if (cache == null) {
+            return ResponseEntity.notFound().build();
+        }
+        cache.clear();
+        return ResponseEntity.noContent().build();
+    }
+}
+```
+
+Points to take into account:
+
+- Restrict the endpoint to operators. `@PreAuthorize` needs method security enabled, and the endpoint should not be reachable from the public internet.
+- Clear by name rather than wiping every cache. Clearing everything at once sends a burst of traffic to the database.
+- With a local cache, `cache.clear()` only affects the instance that receives the call. Call the endpoint on each instance, or publish an invalidation event that all instances consume. With a shared Redis cache, clearing the cache removes the entries for all instances, but any local layer still needs its own refresh.
+- Log who called the endpoint and which cache was cleared. Cache clears can change response times for every user.
+
 ### Cache stampede
 
 When a popular key expires, many requests miss at the same moment and all hit the database. Mitigations:

@@ -14,6 +14,8 @@ Kafka is a distributed log: producers append records to topics, the records are 
 
 Ordering is guaranteed only within a single partition. Records with the same key go to the same partition, so they stay in order relative to each other. Across partitions, there is no global order.
 
+Cluster metadata, meaning which brokers exist, which topics and partitions exist, and who leads each partition, used to be kept in Apache ZooKeeper. Newer releases run in KRaft mode, where a quorum of Kafka controllers stores that metadata using a Raft-based log, and Kafka 4.0 removed ZooKeeper support. Clients do not talk to the metadata store directly, so the change mostly affects operators. When an older tutorial says "start ZooKeeper before Kafka", check the version you run.
+
 ### Producers
 
 Producers choose a partition from the key (or round-robin when the key is null), so records with the same key, such as an order ID, stay ordered. Serialisation converts objects to bytes; use a schema-aware serialiser for shared contracts (see schema management below).
@@ -48,6 +50,42 @@ Rebalancing happens when consumers join or leave a group. Partitions are reassig
 | Exactly-once | Idempotent producer, transactions, and read-process-write within Kafka | Scope is Kafka-to-Kafka; external side effects (a database write, an email) are not covered |
 
 The honest answer for interviews is that most systems use at-least-once delivery with idempotent consumers. Kafka's exactly-once support is real, but it covers Kafka's own reads and writes, not an arbitrary side effect in your code.
+
+### Replication, ISR, and retention
+
+Each partition has a **replication factor**, the number of copies kept on different brokers. One replica is the leader. The others that have caught up with the leader form the **in-sync replica (ISR)** set. A replica that falls behind leaves the set, and it rejoins once it catches up.
+
+`min.insync.replicas` sets how many replicas must hold a write before `acks=all` succeeds. With a replication factor of three and `min.insync.replicas=2`, one broker can fail without losing acknowledged writes, and a write fails rather than being accepted by a lone leader. A common production pairing is `acks=all` with `min.insync.replicas=2`.
+
+Retention decides how long records stay, regardless of whether consumers have read them. It can be set by time (for example, seven days), by size per partition, or both, with whichever limit is reached first. Retention is what makes replay possible. A consumer that starts later, or a new consumer group, can read from the beginning of the retained window.
+
+### Kafka compared with RabbitMQ
+
+| Aspect | Kafka | RabbitMQ |
+|---|---|---|
+| Model | Partitioned, append-only log | Queues fed by exchanges |
+| Removal | Records stay for the retention window | Messages are removed once acknowledged |
+| Several independent readers | Yes; each group keeps its own offset | Each message goes to one consumer; fan-out needs separate queues |
+| Replay | Yes, within the retention window | No, once acknowledged |
+| Scaling readers | More partitions and consumers in a group | More competing consumers on a queue |
+| Ordering | Within a partition | In queue order, but competing consumers process messages concurrently |
+| Routing | By topic and key | Rich routing through exchange types and bindings |
+| Protocol | Kafka binary protocol over TCP | AMQP 0-9-1 natively, with plugins for MQTT and STOMP |
+
+Choose Kafka for high-throughput event streams that several consumers replay or process differently. Choose RabbitMQ for task queues, request-style messaging, and routing rules that must be flexible. Both can serve a microservice system, and some architectures use both for different traffic.
+
+### Where Kafka fits
+
+Kafka appears in several common designs:
+
+- **Log and metrics aggregation**: many services write events; analytics and monitoring systems read them.
+- **Stream processing**: consumers compute counts, joins, and windows over continuous data.
+- **Service integration**: services publish domain events that other teams subscribe to without a direct call.
+- **Event sourcing and CQRS**: the log is the record of change, and read models are built from it.
+- **Ingestion**: devices or partners send high volumes that are buffered and processed later.
+- **Fraud and anomaly detection**: transactions are scored as they arrive.
+
+In each case the requirements that matter are throughput, retention, and the ability to replay, not only delivery.
 
 ### Tombstones and compaction
 
@@ -140,6 +178,17 @@ Kafka Streams is a Java library for stateful stream processing (aggregations, jo
 3. Consumers in a group are assigned partitions. Each reads from its committed offset.
 4. After processing, the consumer commits its offset.
 5. On failure, the error handler retries, then routes the record to a DLT if it still cannot be processed.
+
+## Troubleshooting common problems
+
+| Symptom | Likely cause | What to do |
+|---|---|---|
+| A new consumer sees no messages | Its offset is at the end, or the group reset is wrong | Check the group's committed offsets; reset them deliberately if you need to replay |
+| Consumption is slow and partitions are busy | Too few partitions for the consumer count | Add partitions (this changes key mapping for new records) and scale consumers |
+| Messages lost after a broker failure | `acks=1`, or `acks=all` without a sufficient `min.insync.replicas` | Use `acks=all` with `min.insync.replicas=2` on a replication factor of three |
+| Duplicates appear | Retries after a timeout, or a consumer restart before commit | Enable the idempotent producer and make the consumer idempotent |
+| Consumer lag keeps growing | Processing is slower than arrival | Profile the handler, batch database writes, and add consumers up to the partition count |
+| Memory pressure on consumers | Very large batches or fetch sizes | Lower `max.poll.records` or the fetch limits, and process in smaller batches |
 
 ## Common pitfalls
 

@@ -21,3 +21,14 @@ Keeping caches consistent across many instances, choosing an invalidation strate
 ---
 
 **See also:** [Redis Caching in Spring Boot](spring-cache-and-redis.md) | [Testing](../11-testing/index.md) | [Databases and SQL](../06-databases-sql/index.md)
+
+### More in this section
+
+### [Local Caching with Caffeine and EhCache](local-caching-ehcache-caffeine.md)
+**Core concepts - Local versus distributed - How it works / Step by step - Common pitfalls - Quick recap**
+A local cache keeps values in the memory of one JVM, so a lookup costs no network round trip. It is the fastest cache you can build, and it is also the most private: each...
+
+### [Redis Advanced Patterns](redis-advanced-patterns.md)
+**Core concepts - Distributed locks - Rate limiting - Leaderboards - Pub/Sub and when to use Streams**
+Redis is an in-memory data store with rich data types, and it is often used for caching, sessions, rate limits, leaderboards, and locks. The basics of Spring integration and...
+

@@ -47,3 +47,9 @@ Continues from Part 1.
 ### [Java-Specific Coding Problems (Part 3 of 3)](java-coding-problems-part-3.md)
 Continues from Part 1.
 
+### More in this section
+
+### [How to Approach Coding Questions](how-to-approach-coding-questions.md)
+**Question Categories - Approach in Six Steps - Complexity Cheat Sheet - Common Techniques - Worked Example: Two Sum**
+A repeatable method for live coding rounds: what the common question categories look like, the steps to follow, a complexity cheat sheet, and the techniques that solve most...
+

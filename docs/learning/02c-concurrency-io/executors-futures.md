@@ -32,6 +32,7 @@ Common factory methods on `Executors`:
 | `newFixedThreadPool(n)` | Fixed number of threads, unbounded queue |
 | `newCachedThreadPool()` | Creates threads as needed and reuses idle ones |
 | `newSingleThreadExecutor()` | One thread, tasks run in order |
+| `newScheduledThreadPool(n)` | Runs tasks after a delay or on a fixed period |
 | `newVirtualThreadPerTaskExecutor()` | One virtual thread per task (Java 21) |
 
 The factory methods are convenient, but they hide the queue and the thread limits. For production code, many teams build a `ThreadPoolExecutor` directly so the limits are explicit.
@@ -107,6 +108,35 @@ public class CallableDemo {
 
 `Future` alone cannot be chained or combined with other futures. That limitation led to `CompletableFuture`.
 
+### FutureTask
+
+`FutureTask<V>` is a concrete class that implements both `Runnable` and `Future<V>`. Because it is a `Runnable`, you can hand it to a `Thread` or submit it to an executor. Because it is a `Future`, you can read its result afterwards. Build one yourself when you want to keep a handle on work you run directly.
+
+```java
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+public class FutureTaskDemo {
+    public static void main(String[] args) throws Exception {
+        FutureTask<String> task = new FutureTask<>(() -> {
+            Thread.sleep(300);
+            return "report ready";
+        });
+        new Thread(task, "reporter").start();   // a FutureTask is a Runnable
+
+        try {
+            System.out.println(task.get(100, TimeUnit.MILLISECONDS));
+        } catch (TimeoutException e) {
+            System.out.println("not finished yet, cancelling");
+            task.cancel(true);                  // interrupts the reporter thread
+        }
+    }
+}
+```
+
+A parameterless `get()` blocks until the task completes, then returns the value or throws `ExecutionException`. The timed overload stops waiting after the given time and throws `TimeoutException`, but the task itself keeps running unless you cancel it.
+
 ### CompletableFuture
 
 `CompletableFuture<T>` is a `Future` that you can complete manually, chain, and combine without blocking. Work runs on the common pool by default, or on an executor you pass in.
@@ -172,6 +202,97 @@ public class IoPoolDemo {
 }
 ```
 
+### Handling errors in a chain
+
+An exception thrown in a stage skips the later `thenApply`-style stages and moves forward as a failure. Three methods deal with it:
+
+- `exceptionally(fn)`: returns a fallback value. Later stages receive that value.
+- `handle(fn)`: receives either the result or the exception, and returns a new value in both cases.
+- `whenComplete(action)`: observes the outcome without changing it. Use it for logging.
+
+```java
+import java.util.concurrent.CompletableFuture;
+
+public class ErrorChain {
+    public static void main(String[] args) {
+        int value = CompletableFuture
+                .supplyAsync(() -> Integer.parseInt("12x"))   // throws NumberFormatException
+                .thenApply(n -> n * 2)                         // skipped
+                .exceptionally(ex -> {
+                    System.out.println("failed: " + ex.getMessage());
+                    return -1;                                 // fallback value
+                })
+                .join();
+        System.out.println(value);                             // -1
+    }
+}
+```
+
+The failure reaches your callback wrapped in a `CompletionException` when it comes from a dependent stage, so inspect `getCause()` if you need the original type.
+
+### A parallel lookup pipeline
+
+A typical service call fetches several independent pieces of data and combines them. Starting both calls before waiting for either is what makes the work parallel.
+
+```java
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class ProfileLookup {
+    private final ExecutorService io = Executors.newFixedThreadPool(8);
+
+    CompletableFuture<String> loadAccount(long id) {
+        return CompletableFuture.supplyAsync(() -> "account-" + id, io);
+    }
+
+    CompletableFuture<Integer> countOrders(long id) {
+        return CompletableFuture.supplyAsync(() -> 3, io);
+    }
+
+    CompletableFuture<String> profile(long id) {
+        return loadAccount(id)
+                .thenCombine(countOrders(id),
+                        (account, orders) -> account + " has " + orders + " orders")
+                .exceptionally(ex -> "profile unavailable");
+    }
+
+    public static void main(String[] args) {
+        ProfileLookup lookup = new ProfileLookup();
+        System.out.println(lookup.profile(42L).join());   // account-42 has 3 orders
+        lookup.io.shutdown();
+    }
+}
+```
+
+For a variable number of futures, use `allOf`, which completes when all of them do. It returns `CompletableFuture<Void>`, so read the results from the individual futures afterwards. `anyOf` completes with the first result to arrive.
+
+```java
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+public class AllOfDemo {
+    public static void main(String[] args) {
+        List<CompletableFuture<Integer>> tasks = List.of(
+                CompletableFuture.supplyAsync(() -> 1),
+                CompletableFuture.supplyAsync(() -> 2),
+                CompletableFuture.supplyAsync(() -> 3));
+
+        CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0])).join();
+        List<Integer> values = tasks.stream().map(CompletableFuture::join).toList();
+        System.out.println(values);   // [1, 2, 3]
+    }
+}
+```
+
+| Aspect | `Future` | `CompletableFuture` |
+|---|---|---|
+| Chaining follow-up work | Not possible; you call `get()` and then act | `thenApply`, `thenCompose`, and similar |
+| Combining several results | Manual loops with `get()` | `thenCombine`, `allOf`, `anyOf` |
+| Error handling | `try`/`catch` around `get()` | `exceptionally`, `handle`, `whenComplete` |
+| Completing it yourself | Not possible | `complete(value)` |
+| Callbacks | Not available; you must poll or block | Run when the result arrives |
+
 ### Virtual threads and executors (Java 21)
 
 Java 21 made virtual threads a final feature. A per-task virtual thread executor suits code that spends most of its time waiting on network or disk, because waiting virtual threads do not block operating system threads. Do not expect a speed-up for CPU-bound work, and do not pool virtual threads; create one per task.
@@ -197,6 +318,14 @@ public class VirtualThreadsDemo {
 ### Shutting down
 
 Always shut down an executor, or the JVM may not exit because pool threads are non-daemon. `shutdown()` finishes queued tasks and stops accepting new ones. `shutdownNow()` attempts to interrupt running tasks and returns the tasks that never started.
+
+### Risks of thread pools
+
+A pool removes the cost of creating threads, but it introduces failure modes of its own:
+
+- **Pool deadlock:** a task waits for the result of another task that is queued behind it in the same saturated pool. Every worker is blocked, so the queued task never runs. Keep tasks that depend on each other in separate pools.
+- **Thread leakage:** a worker that dies from an uncaught exception must be replaced. A hand-written pool that does not replace dead workers shrinks until nothing is left to run tasks. The standard `ThreadPoolExecutor` replaces them, but an uncaught exception still deserves handling inside the task.
+- **Resource thrashing:** more threads than the work can use means the CPU spends its time context switching and the threads compete for memory and locks. A common starting point is about one thread per CPU core for CPU-bound work, with a larger number for I/O-bound work. Measure before you settle on a number.
 
 ## How it works / Step by step
 

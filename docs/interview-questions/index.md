@@ -31,3 +31,10 @@ Answer templates and guidance. Adapt every answer to your own experience.
 1. Read the question and say your answer aloud before you open it.
 2. Open the answer and compare. Note what you missed.
 3. Repeat the questions you missed on the next day, then after a week.
+
+### More in this section
+
+### [Interview Process](interview-process.md)
+**Before the interview - During the interview - Behavioural rounds (STAR) - Practice question formats - After the interview**
+This page covers how to prepare for a technical interview, how to handle each round while it happens, and what to do afterwards. The practice questions are elsewhere: coding...
+

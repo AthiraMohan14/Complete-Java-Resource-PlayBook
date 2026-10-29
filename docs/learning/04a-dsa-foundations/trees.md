@@ -447,4 +447,4 @@ You will rarely implement these in an interview. Know what problem each one solv
 - For tree DP, return one value to the parent and keep the global answer in a side variable.
 - Serialise with pre-order and `#` markers to rebuild a unique tree.
 
-**See also:** [Arrays & Strings](arrays-strings.md), [Linked Lists](linked-lists.md), [Stacks & Queues](stacks-queues.md), [DSA Foundations](index.md)
+**See also:** [Arrays & Strings](arrays-strings.md), [Linked Lists](linked-lists.md), [Stacks & Queues](stacks-queues.md), [Heaps and Tries](heaps-and-tries.md), [DSA Foundations](index.md)

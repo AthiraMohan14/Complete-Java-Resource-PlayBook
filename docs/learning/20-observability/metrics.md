@@ -57,6 +57,14 @@ Prometheus also evaluates **alerting rules** over the stored series. The rule la
 - **JVM:** heap usage, GC pause time, live thread count. Spring Boot binds these automatically (names such as `jvm.memory.used`, `jvm.gc.pause`, `jvm.threads.live`).
 - **Business:** active users, conversions, revenue. These show whether the system is doing its job, not just running.
 
+### RED and USE: two checklists
+Two short methods help you decide which metrics to build dashboards and alerts on.
+
+- **RED** (Rate, Errors, Duration) suits request-driven services. For each endpoint or service, chart the request rate, the share of failed requests, and the latency distribution.
+- **USE** (Utilization, Saturation, Errors) suits resources such as CPU, memory, disks, network links, and connection pools. Utilization shows how busy the resource is. Saturation shows queued work that cannot be served yet, such as threads waiting for a connection. Errors count failed operations on the resource.
+
+For a Java service, RED covers the HTTP layer and USE covers the JVM heap, GC, thread pool, and database connection pool. On Kubernetes, add object-level signals too: pod restart counts, pods not ready, and desired versus available replicas for each Deployment. Kubernetes exposes these through kube-state-metrics and the metrics API, so they are not Micrometer metrics.
+
 ### Percentiles: why averages mislead
 
 An average hides the tail. If 99 requests take 10 ms and one takes 5 seconds, the mean looks fine. A percentile exposes the tail. Two practical points:

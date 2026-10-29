@@ -65,6 +65,51 @@ public class Point {
 ### Constructor chaining with super
 A subclass constructor calls its superclass constructor first. If the first statement is not `this(...)` or `super(...)`, the compiler inserts `super()`. This is why a superclass with only a parameterized constructor forces every subclass to pass arguments up.
 
+### Copy constructors and the builder pattern
+A copy constructor takes an object of the same class and copies its state. It gives you an independent object without `clone()`, which is awkward to implement correctly. A builder collects optional settings step by step and then creates an immutable object in one place.
+
+```java
+public class Settings {
+    private final String host;
+    private final int port;
+
+    private Settings(Builder builder) {
+        this.host = builder.host;
+        this.port = builder.port;
+    }
+
+    public Settings(Settings other) {        // copy constructor
+        this.host = other.host;
+        this.port = other.port;
+    }
+
+    public static class Builder {
+        private String host = "localhost";
+        private int port = 8080;
+
+        public Builder host(String host) {
+            this.host = host;
+            return this;
+        }
+
+        public Builder port(int port) {
+            this.port = port;
+            return this;
+        }
+
+        public Settings build() {
+            return new Settings(this);
+        }
+    }
+
+    public static void main(String[] args) {
+        Settings s = new Settings.Builder().port(9000).build();
+        Settings copy = new Settings(s);
+        System.out.println(copy.host + ":" + copy.port);   // localhost:9000
+    }
+}
+```
+
 ### Initialization order
 When a class is first used, its static fields and static initializer blocks run once, in textual order. For each new object, the order is:
 
@@ -96,16 +141,41 @@ public class Init {
 
 Running this prints the static block first (when the class is initialized, before `main`'s first line when `main` lives in that class), then the instance steps in order.
 
+### Static members
+A `static` member belongs to the class. Static fields have one copy shared by all instances. Static methods are called on the class and cannot use `this` or instance fields. Static initializer blocks run once, when the class is initialized. A static nested class has no link to an instance of the outer class.
+
+Static methods are hidden, not overridden. The method that runs is chosen by the declared type of the reference, not by the object's actual class:
+
+```java
+class Parent {
+    static String name() { return "parent"; }
+}
+
+class Child extends Parent {
+    static String name() { return "child"; }   // hides Parent.name(); does not override it
+}
+
+public class HidingDemo {
+    public static void main(String[] args) {
+        Parent p = new Child();
+        System.out.println(p.name());          // parent: chosen by the declared type
+        System.out.println(Child.name());      // child
+    }
+}
+```
+
 ### Instance members and variable scope
 Instance methods can read and write instance fields and call other instance methods. Static methods cannot refer to `this` or instance fields directly. A parameter or local variable can hide a field of the same name; use `this.name` to reach the field.
 
-### Composition versus aggregation
-Both mean one object holds another. The difference is lifetime ownership.
+### Association, aggregation, composition, and dependency
+Objects relate to each other in four common ways. The first three are about how long the linked objects live. Dependency is about how long one class relies on another.
 
-| Relation | Ownership | Example |
-|---|---|---|
-| Composition | The whole creates and owns the part; the part does not outlive the whole | An `Order` creates its `OrderLine` objects |
-| Aggregation | The whole references parts that exist independently | A `Team` refers to `Player` objects that can exist without it |
+| Relation | Meaning | Ownership and lifetime | Example |
+|---|---|---|---|
+| Association | One object knows about another through a link | Neither owns the other; both can exist alone | A `Student` is linked to a `Course` through an enrollment |
+| Aggregation | A "has-a" link where the part can exist without the whole | The whole refers to parts it does not own | A `Team` refers to `Player` objects that can exist without it |
+| Composition | A "part-of" link where the part cannot outlive the whole | The whole creates and owns the part | An `Order` creates its `OrderLine` objects |
+| Dependency | A class uses another briefly, typically in a method | No field; the relation lasts for one call | A report service uses a printer inside one method |
 
 ```java
 import java.util.ArrayList;
@@ -125,6 +195,22 @@ class Team {                          // aggregation: receives existing players
 ```
 
 These examples assume `java.util.ArrayList` and `java.util.List` are imported, and `Player` is a separate class. Composition is usually preferred for code you control, because it keeps lifetimes simple.
+
+A dependency keeps no field. The class uses the other one inside a method and forgets it afterwards:
+
+```java
+class Printer {
+    void print(String text) {
+        System.out.println(text);
+    }
+}
+
+class ReportService {
+    void publish(String text) {
+        new Printer().print(text);   // dependency: no field, used only inside this method
+    }
+}
+```
 
 ### Encapsulation
 Encapsulation keeps fields `private` and exposes behaviour through methods. Getters return values, setters validate and then assign. Avoid a setter for every field; often a method that performs an operation (such as `deposit`) expresses intent better.
@@ -160,6 +246,75 @@ public class Order {
     }
 }
 ```
+
+### JavaBeans, POJOs, and EJB
+These three terms describe how a class is written and what it is for.
+
+- **POJO (plain old Java object):** an ordinary class that does not extend or implement a framework type. Frameworks can use it without special rules. Most domain and DTO classes are POJOs.
+- **JavaBean:** a POJO that follows conventions so tools can read and edit its properties. It has a public no-argument constructor, private fields exposed through getters and setters, and, as a common convention, implements `Serializable`. The JavaBeans specification itself does not require `Serializable`.
+- **EJB (Enterprise JavaBean):** a server-side component model from the enterprise platform. EJBs add transactions, security, and remote access managed by the container. They are heavier than beans and POJOs. In current code the package names are `jakarta.ejb.*`; older code uses `javax.ejb.*`.
+
+```java
+import java.io.Serializable;
+
+public class StudentBean implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    private String name;
+    private int age;
+
+    public StudentBean() { }                 // public no-argument constructor
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public int getAge() { return age; }
+    public void setAge(int age) { this.age = age; }
+}
+```
+
+Records (Java 16) are a compact way to write a POJO for data that should not change. They do not follow the bean setter convention.
+
+### Serialization
+Serialization turns an object's state into a byte stream, so it can be written to a file or sent over a network. Deserialization rebuilds the object from those bytes. A class opts in by implementing `java.io.Serializable`, a marker interface with no methods. Subclasses of a serializable class are serializable too.
+
+Two details come up in interviews. A `transient` field is skipped, so it comes back as its default value. A `serialVersionUID` identifies the class version. Declare it explicitly, because otherwise the JVM computes one from the class shape, and a small edit can make old data unreadable.
+
+```java
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+
+class Profile implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    String user;
+    transient String password;     // not written to the stream
+}
+
+public class SerializationDemo {
+    public static void main(String[] args) throws IOException, ClassNotFoundException {
+        Profile original = new Profile();
+        original.user = "ada";
+        original.password = "secret";
+
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
+            out.writeObject(original);
+        }
+
+        try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            Profile copy = (Profile) in.readObject();
+            System.out.println(copy.user + " " + copy.password);   // ada null
+        }
+    }
+}
+```
+
+Avoid deserializing data from untrusted sources. Java deserialization has a long history of security bugs, so prefer a plain data format such as JSON for data that crosses a trust boundary.
 
 ### Object identity, equals and hashCode
 `==` compares identity. Override `equals` and `hashCode` together when objects should compare by value, and keep them consistent: equal objects must have equal hash codes. Records (Java 16) generate both for you.

@@ -113,7 +113,7 @@ Do not use mutable objects as keys if their hash-relevant fields can change afte
 
 **Collision handling.** Two keys can map to the same bucket. Common strategies:
 
-- **Separate chaining:** each bucket holds a list. Java's `HashMap` uses this. When a bucket grows long, Java converts it to a tree (treeification) to keep worst-case lookup at O(log n) for keys that implement `Comparable`.
+- **Separate chaining:** each bucket holds a list. Java's `HashMap` uses this. When a bucket grows long, Java converts it to a tree (treeification) to keep worst-case lookup at O(log n). Treeification happens only when a bucket holds 8 or more entries and the table has at least 64 slots; otherwise the table resizes instead. The tree bins order keys by `Comparable` when they provide it.
 - **Open addressing:** on collision, probe for another empty slot (linear, quadratic, or double hashing). Needs a lower load factor.
 
 The default load factor of `HashMap` is 0.75; a resize doubles the table when the threshold is exceeded.

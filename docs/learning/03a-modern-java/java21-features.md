@@ -39,6 +39,73 @@ public class VirtualThreadBasics {
 
 Virtual threads are not faster CPU work. They help when tasks spend time waiting. They are also not pooled: create a new one per task, and do not put them in a fixed-size pool.
 
+### The problem: platform threads cap concurrency
+
+A fixed pool of platform threads limits how many blocking calls can be in flight at once. Every extra task waits in the queue, even though the CPU is idle. Raising the pool size costs memory, because each platform thread reserves its own stack, and the operating system spends more time switching between threads.
+
+```java
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class PlatformPoolLimit {
+    static String callRemoteService() throws InterruptedException {
+        Thread.sleep(200);          // stands in for a slow network call
+        return "ok";
+    }
+
+    public static void main(String[] args) {
+        try (ExecutorService pool = Executors.newFixedThreadPool(200)) {
+            for (int i = 0; i < 10_000; i++) {
+                pool.submit(PlatformPoolLimit::callRemoteService); // queued until a thread is free
+            }
+        } // close() waits for the queue to drain; at most 200 calls run at once
+    }
+}
+```
+
+### The solution: one virtual thread per task
+
+Replacing the fixed pool with a virtual-thread-per-task executor keeps the same blocking code. The JVM parks a virtual thread during the `sleep` and reuses the carrier thread for other work, so thousands of waiting tasks can exist at the same time.
+
+```java
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+class PlatformPoolLimit {
+    static void callRemoteService() {
+        // simulated blocking call
+    }
+}
+
+public class VirtualPerTask {
+    public static void main(String[] args) {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < 10_000; i++) {
+                executor.submit(PlatformPoolLimit::callRemoteService);
+            }
+        } // close() waits for all 10,000 tasks; they run concurrently, not 200 at a time
+    }
+}
+```
+
+The difference is the scheduling model, not the code inside the task. Limit access to a scarce resource with a `Semaphore` instead of with the pool size. This is the usual pattern for a database connection limit.
+
+### Virtual threads versus reactive frameworks
+
+Reactive frameworks such as Spring WebFlux solved the same problem by making every step non-blocking and chaining callbacks. Virtual threads let blocking code scale, so for many request-per-thread services they remove the main reason to adopt reactive code.
+
+| Aspect | Virtual threads | Reactive (for example WebFlux) |
+|---|---|---|
+| Code style | Synchronous and imperative | Asynchronous operator chains |
+| Learning curve | Ordinary Java; existing libraries work | Operators, subscriptions, and schedulers to learn |
+| Stack traces | Complete, one thread per request | Split across operator stages |
+| Blocking calls | Acceptable; the carrier is released | Not acceptable on the event loop |
+| Error handling | `try` and `catch` | Error operators such as `onErrorResume` |
+| Backpressure and streams | Not built in; use bounded queues or semaphores | Built in as part of the model |
+| Best fit | Blocking I/O with existing libraries, on Java 21 or later | Streaming data, backpressure requirements, existing reactive systems |
+
+Reactive code still earns its place when data flows as a stream with backpressure, or when a system is already built on reactive types. Frameworks such as Spring Boot can be configured to run tasks and requests on virtual threads; check the framework's documentation for the setting that matches your version.
+
 ### Pinning
 
 A virtual thread can be **pinned** to its carrier thread, which blocks the carrier. The two common causes are running inside a `synchronized` block or method and calling native code. Java 21 still pins inside `synchronized`. The fix is to replace `synchronized` with `ReentrantLock` in code that blocks while holding the lock.

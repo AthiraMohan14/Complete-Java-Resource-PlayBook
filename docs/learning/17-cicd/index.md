@@ -17,3 +17,10 @@ Automated builds and tests, pipeline definitions across the major CI tools, and 
 ### [Continuous Deployment and IaC](continuous-deployment-iac.md)
 **blue-green - canary - rolling - shadow - Terraform - CloudFormation - Ansible - rollback**
 Safe release strategies, infrastructure defined as code, secrets handling in pipelines, and post-deployment verification.
+
+### More in this section
+
+### [Git: Pull, Merge, Rebase, and Renames](git-pull-merge-rebase.md)
+**Core concepts - How it works / Step by step - Worked example: resolving a conflict during a rebase - Common pitfalls - Quick recap**
+Git history is how a team understands what changed and why. Interviewers ask about `pull` versus `rebase`, and about merging versus rebasing, because the choice affects the...
+

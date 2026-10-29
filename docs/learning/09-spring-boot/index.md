@@ -33,3 +33,14 @@ Calling other services with timeouts and retries, and testing Spring Boot applic
 ---
 
 **See also:** [Spring Core](../08-spring-core/index.md) | [Security](../10-security/index.md) | [Testing](../11-testing/index.md)
+
+### More in this section
+
+### [Reactive Programming with Spring WebFlux](reactive-webflux.md)
+**Core concepts - Reactive data access - WebClient for outbound calls - Error handling operators - Testing reactive code**
+Spring WebFlux is the reactive web layer of Spring. It handles requests on a small number of event-loop threads and treats responses as streams of `Mono` (zero or one value)...
+
+### [Async Work and Threading in Spring Boot](spring-async-and-threading.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Spring lets you run work off the request thread with `@Async`, return results as `CompletableFuture`, and size the executors that do the work. Interviewers ask about this to...
+

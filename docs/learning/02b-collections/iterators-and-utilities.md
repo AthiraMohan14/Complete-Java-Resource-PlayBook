@@ -115,6 +115,14 @@ A class that implements `Iterable<T>` can be used in a for-each loop. `spliterat
 | `emptyList()`, `singletonList(x)`, `nCopies(n, x)` | Common small immutable collections |
 | `swap(list, i, j)` | Swap two elements |
 | `binarySearch(list, key)` | Search a sorted list |
+| `addAll(coll, elements...)` | Add several elements in one call |
+| `rotate(list, distance)` | Shift elements circularly by a distance |
+| `fill(list, x)` | Set every position to the same value |
+| `copy(dest, src)` | Copy into a destination list at least as long as the source |
+| `disjoint(c1, c2)` | True when the two collections share no element |
+| `replaceAll(list, oldVal, newVal)` | Replace every occurrence of a value |
+
+`Collections.sort` is stable: equal elements keep their relative order. It uses a merge-based algorithm (TimSort for objects), so its worst case is O(n log n).
 
 ```java
 import java.util.ArrayList;

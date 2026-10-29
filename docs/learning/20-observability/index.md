@@ -23,3 +23,10 @@ Follow one request across several services and find where the time goes.
 Decide what should wake someone up, expose health endpoints for orchestrators, and route alerts to the right people.
 
 **See also:** [Part 4 roadmap, section 20](../../resources/full-stack-java-roadmap/part-4-design-interview-projects.md)
+
+### More in this section
+
+### [Logging Configuration and Performance Tuning](logging-frameworks-and-performance.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Logs and performance problems often show up together: too much logging slows a request, and a slow request produces more logs. This page covers how to configure logging in a...
+

@@ -55,6 +55,38 @@ Compared with `synchronized`:
 
 A `ReadWriteLock` (`ReentrantReadWriteLock`) allows many readers or one writer. It helps when reads far outnumber writes. `StampedLock` offers optimistic reads, but it is not reentrant, so use it with care.
 
+```java
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class ConfigCache<K, V> {
+    private final Map<K, V> map = new HashMap<>();
+    private final ReadWriteLock rw = new ReentrantReadWriteLock();
+
+    public V get(K key) {
+        rw.readLock().lock();          // many readers may hold this at once
+        try {
+            return map.get(key);
+        } finally {
+            rw.readLock().unlock();
+        }
+    }
+
+    public void put(K key, V value) {
+        rw.writeLock().lock();         // excludes readers and other writers
+        try {
+            map.put(key, value);
+        } finally {
+            rw.writeLock().unlock();
+        }
+    }
+}
+```
+
+Note that a plain `HashMap` is safe here only because every access goes through the lock. For a shared map with no extra logic, `ConcurrentHashMap` is usually the better choice.
+
 ### Semaphore
 
 A `Semaphore` holds a number of permits. `acquire()` takes one (blocking if none are free), and `release()` returns one. Use it to limit concurrent access, such as the number of connections to an external service.
@@ -211,6 +243,19 @@ Two cautions:
 - Values are not inherited by default when a new thread starts. `InheritableThreadLocal` copies the value at thread creation. Virtual threads and structured concurrency change how this is used, so check the current docs before relying on it.
 
 For Java code, `java.time` types and `DateTimeFormatter` are thread-safe and avoid this problem (see [Date and Time](../03c-tooling-utilities/date-time.md)).
+
+### Choosing a tool
+
+| Situation | Reach for |
+|---|---|
+| Simple critical section, no timeout needed | `synchronized` |
+| Need a timed `tryLock`, interruptible wait, fairness, or several conditions | `ReentrantLock` |
+| Reads far outnumber writes on shared structure | `ReentrantReadWriteLock` |
+| One counter or flag updated by many threads | `AtomicInteger`, `AtomicBoolean`, or `LongAdder` |
+| Several fields must change together | A lock (atomics only cover one variable each) |
+| Limit concurrent use of a resource | `Semaphore` |
+
+In short, use `synchronized` for simple shared state, and atomics for a single value. Move to explicit locks only when you need a feature `synchronized` lacks, because the extra control is also extra responsibility.
 
 ## How it works / Step by step
 

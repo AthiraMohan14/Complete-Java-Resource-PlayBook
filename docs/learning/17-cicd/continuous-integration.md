@@ -125,6 +125,24 @@ Keep the pipeline definition in the repository next to the code it builds. Chang
 ### Reporting and notifications
 Publish test reports and coverage results where developers look, usually on the pull request. Notify the author on failure, not on every success, so messages stay meaningful. Quarantine flaky tests into a separate job with an owner, rather than letting them block everyone.
 
+### The full pipeline at a glance
+A pipeline runs cheap, fast checks first, and each stage gates the next. Build the artifact once, then promote that same artifact through the later stages.
+
+```mermaid
+flowchart LR
+    A[Checkout] --> B[Build]
+    B --> C[Unit tests]
+    C --> D[Static analysis and security scan]
+    D --> E[Package image or JAR]
+    E --> F[Integration tests]
+    F --> G[Publish to registry or artifact repository]
+    G --> H[Deploy]
+    H --> I[Smoke tests]
+    I -->|fail| J[Roll back]
+```
+
+Quality gates such as coverage thresholds and "no high-severity findings" belong between the stages, so a failing check stops the promotion. Secrets come from the CI system's secret store or a vault, never from the pipeline file itself.
+
 ## How it works / Step by step
 1. A pull request or push triggers the pipeline.
 2. The runner checks out the code and restores cached dependencies.

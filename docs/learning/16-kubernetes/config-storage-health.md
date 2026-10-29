@@ -156,6 +156,69 @@ public class ShutdownDemo {
 }
 ```
 
+## Scaling
+Kubernetes can change the size or the resource settings of a workload while it runs. Two autoscalers handle the two directions:
+
+- The **Horizontal Pod Autoscaler (HPA)** changes the number of replicas.
+- The **Vertical Pod Autoscaler (VPA)** changes the CPU and memory requests of each pod.
+
+### Horizontal Pod Autoscaler
+The HPA is part of core Kubernetes. It reads a metric, compares it with a target, and adjusts `replicas` on the target Deployment within a minimum and maximum. For CPU and memory targets, utilisation is measured against the container's **request**, so the pods must declare requests or the HPA has nothing to compare against.
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orders-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orders
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+The HPA needs a metrics source, such as the metrics server, installed in the cluster. Custom metrics, such as requests per second, use the same `metrics` list with a different metric type.
+
+### Vertical Pod Autoscaler
+The VPA is not part of core Kubernetes. It is an add-on that you install separately. It watches actual usage and recommends requests for each container. With `updateMode: "Auto"` it applies those values by evicting and recreating pods. With `updateMode: "Off"` it only publishes recommendations, which is a safe way to learn the right numbers first.
+
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: orders-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orders
+  updatePolicy:
+    updateMode: "Off"
+```
+
+### When to use each
+| Situation | Use |
+|---|---|
+| Load varies, and the app handles more replicas well | HPA |
+| Requests are guessed wrongly, or pods are over-provisioned | VPA in `Off` mode to read recommendations |
+| Stateful workloads where adding replicas is hard | VPA, with care about restarts |
+| Replica count and size both need to adapt | HPA on one metric plus VPA on a different one, or VPA only |
+
+Pitfalls for Java workloads:
+
+- Do not point HPA and VPA at the same CPU or memory metric for one workload. They fight each other.
+- A VPA `Auto` update restarts pods, so it can cause brief disruption unless replicas are spread out.
+- A JVM sized from a small memory request may need heap settings that follow the container limit, such as `-XX:MaxRAMPercentage`, so that scaling the request also scales the heap.
+
 ## How it works / Step by step
 1. The pod spec references ConfigMaps and Secrets, which are injected as environment variables or files at start.
 2. The PVC asks for storage; the StorageClass provisions a PV, which is bound and mounted.

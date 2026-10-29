@@ -2,6 +2,23 @@
 
 Spring Boot removes most of the setup that a Spring application once needed: you get a running web server, sensible defaults, and configuration read from files and the environment. Interviewers ask about this because the "magic" of auto-configuration is easy to use without understanding, and that gap shows up quickly in debugging and design questions.
 
+## Spring versus Spring Boot
+
+Spring Boot is not a replacement for Spring. It is a layer built on the Spring Framework that makes the usual choices for you. The table below shows what changes between the two.
+
+| Topic | Spring Framework | Spring Boot |
+|---|---|---|
+| What it gives you | Dependency injection, AOP, MVC, data access, and transaction support | The same features, preconfigured for common cases |
+| Wiring | You declare beans and infrastructure yourself, in Java or XML | Auto-configuration creates default beans based on the classpath |
+| Web server | You deploy a WAR to an external servlet container | An embedded Tomcat, Jetty, or Undertow runs inside an executable JAR |
+| Library versions | You choose compatible versions of each library | Starters and the parent POM or BOM align the versions |
+| Configuration | Explicit beans, plus property files you load yourself | Standard `application` files, profiles, and typed properties |
+| Operations | Health checks and metrics are your job to build | Actuator endpoints are available once you expose them |
+| Testing | You assemble the context for each test | `@SpringBootTest` and test slices load only what a test needs |
+| Boilerplate | More setup code and descriptors | Much less, because defaults cover the common path |
+
+The short answer for an interview: Spring provides the building blocks, and Boot chooses sensible defaults for them and gets out of the way when you define your own.
+
 ## Core concepts
 
 ### @SpringBootApplication
@@ -99,7 +116,64 @@ Spring Boot uses relaxed binding: the environment variable `APP_PAYMENT_URL` map
 
 ### Starters and packaging
 
-A starter is a curated set of dependencies for one purpose (for example, `spring-boot-starter-data-jpa`). Packaging with the Spring Boot Maven or Gradle plugin produces an executable "fat" JAR that contains the application, its dependencies, and an embedded server. Layered JARs let container builds reuse unchanged dependency layers.
+A starter is a curated set of dependencies for one purpose (for example, `spring-boot-starter-data-jpa`). Starters carry no code of their own; they pull in the libraries and the auto-configuration that uses them. Because the versions are managed by Boot's parent POM or BOM, you leave the version off the starter.
+
+| Starter | Use it for | Brings in (main parts) |
+|---|---|---|
+| `spring-boot-starter-web` | REST APIs and MVC applications | Spring MVC, embedded Tomcat, Jackson |
+| `spring-boot-starter-webflux` | Non-blocking web applications | Spring WebFlux, Reactor, embedded Netty |
+| `spring-boot-starter-data-jpa` | Relational persistence with entities | Spring Data JPA, Hibernate, HikariCP |
+| `spring-boot-starter-jdbc` | Plain JDBC with `JdbcTemplate` | Spring JDBC, HikariCP |
+| `spring-boot-starter-data-r2dbc` | Reactive relational access | Spring Data R2DBC (add your database driver) |
+| `spring-boot-starter-data-mongodb` | Document storage with MongoDB | Spring Data MongoDB |
+| `spring-boot-starter-data-redis` | Redis as a cache or data store | Spring Data Redis, Lettuce client |
+| `spring-boot-starter-security` | Authentication and authorisation | Spring Security |
+| `spring-boot-starter-oauth2-resource-server` | Accepting bearer tokens such as JWTs | Spring Security resource-server support |
+| `spring-boot-starter-validation` | Bean validation on requests and entities | Jakarta Bean Validation, Hibernate Validator |
+| `spring-boot-starter-actuator` | Health, metrics, and operational endpoints | Actuator and Micrometer |
+| `spring-boot-starter-cache` | The cache abstraction | Spring Cache; you add a provider such as Caffeine |
+| `spring-boot-starter-amqp` | Messaging with RabbitMQ | Spring AMQP |
+| `spring-boot-starter-aop` | Cross-cutting behaviour, such as timing around service methods | Spring AOP and AspectJ weaver |
+| `spring-boot-starter-test` | Tests | JUnit 5, AssertJ, Mockito, Spring Test |
+
+Your database driver is usually not in a starter. Add it yourself, for example the MySQL or PostgreSQL JDBC driver, and check its version against the Boot release.
+
+Packaging with the Spring Boot Maven or Gradle plugin produces an executable "fat" JAR that contains the application, its dependencies, and an embedded server. Layered JARs let container builds reuse unchanged dependency layers.
+
+### Startup and shutdown hooks
+
+Boot publishes events as the application starts. A listener for `ApplicationReadyEvent` runs after the context is fully refreshed and the server is accepting requests, which makes it the right place for work that needs the whole application, such as warming a cache. Work that a bean needs before anything else uses a `@PostConstruct` method, which runs during bean creation.
+
+```java
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+
+@Component
+class CatalogWarmup {
+
+    @EventListener(ApplicationReadyEvent.class)
+    void warm() {
+        // load reference data once the application can serve requests
+    }
+}
+```
+
+For cleanup, a `@PreDestroy` method runs when the context closes, which happens on SIGTERM and on a normal shutdown. Keep it short and bounded, because the container may stop it after a grace period.
+
+```java
+import jakarta.annotation.PreDestroy;
+import org.springframework.stereotype.Component;
+
+@Component
+class ConnectionReleaser {
+
+    @PreDestroy
+    void release() {
+        // flush buffers and close outbound connections
+    }
+}
+```
 
 ## How it works / Step by step
 
@@ -111,11 +185,17 @@ A starter is a curated set of dependencies for one purpose (for example, `spring
 | Source (highest priority first) | Example |
 |---|---|
 | Command-line arguments | `--server.port=9090` |
-| Environment variables | `SERVER_PORT=9090` |
+| `SPRING_APPLICATION_JSON` (inline JSON in an environment variable) | `{"server.port":9090}` |
+| Java system properties | `-Dserver.port=9090` |
+| OS environment variables | `SERVER_PORT=9090` |
 | Profile-specific file | `application-prod.yml` |
 | Default file | `application.yml` |
+| `@PropertySource` on a configuration class | `@PropertySource("classpath:extra.properties")` |
+| Built-in defaults (`SpringApplication` and the framework) | `server.port` defaults to 8080 |
 
-Higher sources override lower ones for the same key.
+Higher sources override lower ones for the same key. The exact list is in the Spring Boot reference documentation for your version; the order above is the one interviewers expect you to know.
+
+Note that a profile-specific file beats the default file, but an environment variable beats both. This is why a secret injected by the platform wins over anything committed to the repository.
 
 ## Common pitfalls
 

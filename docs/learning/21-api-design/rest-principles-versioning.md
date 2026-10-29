@@ -24,12 +24,55 @@ Model your API around **resources** (nouns) rather than actions (verbs). `/order
 
 **Safe** means the method does not change server state. **Idempotent** means doing it twice has the same effect as doing it once. `PUT` replaces the whole representation, so repeating it gives the same result. `PATCH` can be non-idempotent, for example "increment the counter by one". `POST` is neither, so retries of a `POST` can create duplicates (see [idempotency](pagination-errors-idempotency.md#idempotency)).
 
+### HEAD and OPTIONS
+
+- `HEAD` returns the headers that `GET` would return, with no body. Use it to check that a resource exists, or to read `Content-Length` or `ETag` cheaply. Spring MVC answers `HEAD` through your `GET` handlers.
+- `OPTIONS` asks which methods and headers a resource accepts. Browsers send it as a CORS preflight (see [API Security](api-security.md)), and clients can use it for discovery.
+
+```bash
+curl -I https://api.example.com/api/v1/orders/42             # HEAD: headers only
+curl -i -X OPTIONS https://api.example.com/api/v1/orders/42  # look for the Allow header
+```
+
+### DELETE responses
+
+`DELETE` is idempotent in effect: after the first call the resource is gone, and a repeated call leaves the same state. Return `204 No Content` when the removal succeeds. Some APIs return `204` on a repeated delete as well, which keeps retries simple; others return `404` so that callers can tell a missing resource apart. Pick one rule and document it. A delete that a business rule blocks, such as removing an order that has already shipped, returns `409 Conflict`. If the response must explain what happened, `200` with a body is also valid.
+
+### Partial updates: PUT, PATCH, and merge patch
+
+`PUT` expects the complete representation. A client that omits a field usually clears it, which surprises people. `PATCH` sends only the changes, so the body must say what a change means. Two common formats do this:
+
+- **JSON Merge Patch (RFC 7396):** the body has the shape of the resource, and fields set to `null` are removed. It is simple, but it cannot set a value to `null` and also remove it, and it cannot edit array items.
+- **JSON Patch (RFC 6902):** the body is a list of operations. It can express precise changes.
+
+```json
+PATCH /api/v1/orders/42
+Content-Type: application/json-patch+json
+
+[
+  { "op": "replace", "path": "/status", "value": "SHIPPED" },
+  { "op": "add", "path": "/tags/-", "value": "priority" },
+  { "op": "remove", "path": "/note" }
+]
+```
+
+A `PATCH` is not guaranteed to be idempotent. Appending to an array twice adds the item twice, so retry-safe designs need an idempotency key or a state check. Spring does not apply JSON Patch documents by itself; use a JSON Patch library, or accept a DTO whose fields are all optional.
+
 ### Status codes
 
 - **2xx success:** `200 OK`, `201 Created` (include a `Location` header), `204 No Content`
 - **3xx redirect:** `301` and `308` for permanent moves, `304` for cache validation
 - **4xx client error:** `400` malformed request, `401` not authenticated, `403` authenticated but not allowed, `404` not found, `409` conflict, `422` semantically invalid input, `429` too many requests
 - **5xx server error:** `500` unexpected failure, `503` temporarily unavailable
+
+Less common codes worth knowing:
+
+- `206 Partial Content` for range requests, such as resumed downloads
+- `301` and `308` for permanent moves; `302` and `307` for temporary ones. `307` and `308` keep the HTTP method, while `301` and `302` may change it
+- `304 Not Modified` when a cached copy is still valid, using a conditional `GET` with `ETag` or `Last-Modified`
+- `410 Gone` when a resource was removed on purpose and will not return
+- `422` for input that is well formed but breaks a business rule, such as a date in the past
+- `502 Bad Gateway` and `504 Gateway Timeout` when an upstream service fails or is too slow; `503` with a `Retry-After` header when you are shedding load
 
 Use the code that describes the problem. Returning `200` with an error in the body breaks monitoring, caches, and client libraries.
 
@@ -116,6 +159,50 @@ When you must break something:
 3. Signal deprecation to clients with headers such as `Deprecation` and `Sunset` (RFC 8594 defines `Sunset`).
 4. Track which clients still call the old version, and contact them.
 5. Remove the old version only after the timeline ends and usage is clear.
+
+## Hypermedia links (HATEOAS)
+
+HATEOAS (hypermedia as the engine of application state) means a response includes links to related resources and to the actions allowed now. Clients follow links instead of building URLs. The full constraint is rarely applied strictly, but links help with discovery and make allowed actions visible.
+
+```json
+{
+  "id": 42,
+  "status": "PLACED",
+  "_links": {
+    "self":   { "href": "/api/v1/orders/42" },
+    "cancel": { "href": "/api/v1/orders/42/cancellation", "method": "POST" }
+  }
+}
+```
+
+Spring HATEOAS builds links from controller methods, so the URLs stay in step with the code:
+
+```java
+import static org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.linkTo;
+import static org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.methodOn;
+
+import org.springframework.hateoas.EntityModel;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/v1/orders")
+public class OrderLinksController {
+
+    public record OrderView(long id, String status) {}
+
+    @GetMapping("/{id}")
+    public EntityModel<OrderView> get(@PathVariable long id) {
+        OrderView order = new OrderView(id, "PLACED");
+        return EntityModel.of(order,
+                linkTo(methodOn(OrderLinksController.class).get(id)).withSelfRel());
+    }
+}
+```
+
+Add links only where a client can act on them. A link to an action the caller is not allowed to take is a small information leak, so build the links from the same rules that check authorisation.
 
 ## How it works
 

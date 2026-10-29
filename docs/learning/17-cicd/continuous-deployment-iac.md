@@ -14,6 +14,80 @@ Each strategy trades off speed, cost, and risk differently.
 
 In Kubernetes, the rolling strategy is the Deployment default (see the Kubernetes section). Canary and blue-green are usually built on traffic-splitting features of a mesh, an ingress controller, or a progressive-delivery tool.
 
+#### Kubernetes strategies in practice
+Rolling update is configured on the Deployment. `maxSurge` allows extra pods during the rollout, and `maxUnavailable: 0` keeps full capacity. A new pod receives traffic only after its readiness probe passes:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+        - name: orders
+          image: registry.example.com/orders:1.4.1
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+```
+
+Kubernetes does not roll back a Deployment automatically. If the new pods never become ready, the rollout stalls and `progressDeadlineSeconds` marks it as failed. Someone, or the pipeline, must run `kubectl rollout undo`.
+
+Blue-green uses two Deployments and a Service whose selector decides which one receives traffic. Each Deployment's pod template carries a `track: blue` or `track: green` label. Both Deployments run during the switch, so capacity doubles briefly:
+
+```bash
+kubectl apply -f orders-green.yaml                       # green runs the new version; Service still selects blue
+kubectl patch service orders -p '{"spec":{"selector":{"app":"orders","track":"green"}}}'
+kubectl patch service orders -p '{"spec":{"selector":{"app":"orders","track":"blue"}}}'   # instant rollback
+```
+
+Canary without a mesh is approximate. Run nine stable pods and one canary pod behind the same Service, and the canary gets roughly 10% of connections. Kubernetes balances by connection, not by request, so the split drifts with traffic patterns. A mesh or ingress controller gives exact weights, as shown in the Helm and Istio section of the networking page.
+
+Shadow traffic uses the mesh too. Istio's `mirror` field copies each request to a second subset and discards that subset's response:
+
+```yaml
+http:
+  - route:
+      - destination:
+          host: orders
+          subset: stable
+    mirror:
+      host: orders
+      subset: canary
+    mirrorPercentage:
+      value: 100.0
+```
+
+Mirrored requests can cause side effects, such as a second charge or a second email. Point the shadow version at sandbox dependencies, or block writes, before you mirror production traffic.
+
+Progressive-delivery tools such as Flagger automate the canary steps. They raise the canary weight in increments, check success rate and latency from Prometheus at each step, and roll back when a threshold is breached.
+
+Rollout commands for day-to-day control:
+
+```bash
+kubectl rollout status deployment/orders
+kubectl rollout history deployment/orders
+kubectl rollout undo deployment/orders                    # previous revision
+kubectl rollout undo deployment/orders --to-revision=3    # a specific revision
+kubectl rollout pause deployment/orders                   # hold mid-rollout to inspect
+kubectl rollout resume deployment/orders
+```
+
 ### Infrastructure as code (IaC)
 IaC describes servers, networks, databases, and permissions in versioned files, so environments can be created, compared, and recreated.
 
@@ -128,6 +202,41 @@ Modules such as `package` and `copy` are idempotent: running the playbook again 
 ### Drift and state
 Infrastructure drifts when someone changes a resource by hand. Detect it by running a plan regularly and alerting on differences, and fix it by changing code and applying, not by editing the console. The same principle applies to Kubernetes: a GitOps tool that reconciles the cluster against a repository prevents manual changes from lingering.
 
+### GitOps with Argo CD
+GitOps makes a Git repository the single source of truth for what runs in a cluster. A controller inside the cluster compares the desired state in Git with the live state and applies the difference. Nobody runs `kubectl apply` by hand, so every change has a commit, a reviewer, and a history. **Argo CD** is a widely used GitOps controller. Flux works on the same principle.
+
+An Argo CD **Application** connects one Git path to one cluster and namespace:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orders
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/orders-config.git
+    targetRevision: main
+    path: overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: orders
+  syncPolicy:
+    automated:
+      prune: true       # delete cluster objects that were removed from Git
+      selfHeal: true    # revert manual changes that drift from Git
+```
+
+A common layout keeps shared manifests in `base/` and one `overlays/<environment>/` folder per environment, with Kustomize or Helm rendering the difference. A deployment then follows this path:
+
+1. CI builds the image once, pushes it to the registry, and runs the tests.
+2. CI opens a commit (or pull request) that changes the image tag in `overlays/staging`.
+3. After review, the change merges to the branch Argo CD tracks, and Argo CD syncs it (on a poll or a webhook).
+4. The same tag is promoted to `overlays/prod` by another commit, so production runs the artifact that staging tested.
+
+Rolling back is a `git revert` of the change, and the sync brings the cluster back. Keep CI and CD separate: CI should not hold cluster credentials when a GitOps controller can pull the change instead. Secrets cannot sit in plain text in Git. Use an encrypted secret format such as Sealed Secrets or SOPS, or reference a vault.
+
 ## How it works / Step by step
 1. The pipeline builds and publishes a versioned artifact.
 2. Terraform plans and applies infrastructure changes, reviewed before apply.
@@ -152,6 +261,7 @@ Infrastructure drifts when someone changes a resource by hand. Detect it by runn
 - Terraform, CloudFormation, and Ansible describe infrastructure or configuration as versioned code.
 - Pipelines should use short-lived credentials and secret stores, not literal values.
 - Smoke tests, health checks, and automatic rollback decide whether a release stands.
+- GitOps tools such as Argo CD sync a cluster to a Git repository; promote the same image tag through environments by commit.
 - Make releases reversible before you need to reverse one.
 
 **See also:** [Continuous Integration](continuous-integration.md), [Git Workflows](git-workflows.md), [Networking, Helm and Operators](../16-kubernetes/networking-helm-operators.md), [Cloud Platforms](../18-cloud/index.md)

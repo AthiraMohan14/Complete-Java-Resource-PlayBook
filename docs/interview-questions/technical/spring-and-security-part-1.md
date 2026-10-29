@@ -1,11 +1,11 @@
-# Spring, Spring Boot, and Security Questions (Part 1 of 2)
+# Spring, Spring Boot, and Security Questions (Part 1 of 3)
 
 Questions on the Spring container, dependency injection, transactions, Spring Boot auto-configuration, and application security. The examples target Spring Boot 3 and Spring Security 6, which use the `jakarta.*` namespace.
 
 ---
 
 
-This page is split into 2 parts. Continue to [Part 2](spring-and-security-part-2.md).
+This page is split into 3 parts. Continue to [Part 2](spring-and-security-part-2.md).
 
 ## 1. What are inversion of control and dependency injection?
 

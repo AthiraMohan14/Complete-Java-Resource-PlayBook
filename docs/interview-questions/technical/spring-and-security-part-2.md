@@ -1,6 +1,6 @@
-# Spring, Spring Boot, and Security Questions (Part 2 of 2)
+# Spring, Spring Boot, and Security Questions (Part 2 of 3)
 
-Continued from [Part 1](spring-and-security-part-1.md).
+Continued from [Part 1](spring-and-security-part-1.md). Continue to [Part 3](spring-and-security-part-3.md).
 
 ---
 

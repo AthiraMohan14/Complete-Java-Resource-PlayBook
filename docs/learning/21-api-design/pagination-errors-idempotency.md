@@ -137,6 +137,33 @@ Idempotency keys cover client retries. Consumers of queues need the same protect
 
 When clients retry, use **exponential backoff with jitter** so many clients do not retry in lockstep. Retry only errors that are plausibly transient (timeouts, `503`, `429` with a `Retry-After` hint), and not validation errors.
 
+### Paging in Spring MVC
+
+Spring Data binds `page`, `size`, and `sort` query parameters to a `Pageable`. `@PageableDefault` sets the defaults. Return a `Page` when clients need the total count, or a `Slice` when they only need to know whether another page exists.
+
+```java
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/v1/orders")
+public class OrderPageController {
+
+    public record OrderSummary(long id, String status) {}
+
+    @GetMapping
+    public Page<OrderSummary> list(@PageableDefault(size = 20, sort = "id") Pageable pageable) {
+        return Page.empty(pageable);   // replace with a repository query that maps to OrderSummary
+    }
+}
+```
+
+Spring Data recommends against serialising a `Page` object directly, because its JSON shape is not a stable contract. Map it to your own response record, with fields such as `items`, `page`, `size`, `totalElements`, and `hasNext`, or use Spring HATEOAS's `PagedModel`. Then a later change inside Spring Data does not change your API.
+
 ## How it works
 
 1. A client requests a page and receives items plus a next cursor.

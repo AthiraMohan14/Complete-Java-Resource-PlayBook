@@ -4,6 +4,40 @@ Password storage is one of the first things an interviewer checks, because a dat
 
 ## Core concepts
 
+### Hashing, encryption, and HMAC
+
+These three terms are easy to mix up:
+
+- **Hashing** is one-way. A hash cannot be reversed, which suits password storage (with a salt and an adaptive algorithm) and integrity checks, such as the SHA-256 of a downloaded file.
+- **Encryption** is reversible with a key. Symmetric algorithms such as AES use one key for both directions. Asymmetric algorithms such as RSA and ECC use a public and a private key. Encryption gives confidentiality, but it does not by itself prove who sent a message.
+- **HMAC** is a keyed hash. Only holders of the secret can produce or check the tag, so it shows that a message is intact and came from a party with the key. Webhook providers commonly sign payloads this way.
+
+When you check an HMAC, compare the expected and received tags in constant time. An ordinary `equals` returns early at the first mismatch, and the timing can reveal how much of the tag was correct.
+
+```java
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
+public final class PayloadSigner {
+
+    public static String sign(byte[] secret, String payload) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secret, "HmacSHA256"));
+        return HexFormat.of().formatHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    public static boolean isValid(byte[] secret, String payload, String receivedHex) throws Exception {
+        byte[] expected = sign(secret, payload).getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expected, receivedHex.getBytes(StandardCharsets.UTF_8));
+    }
+}
+```
+
+`HexFormat` needs Java 17 or later. The same constant-time rule applies to API keys, reset tokens, and any other secret you compare.
+
 ### Why fast hashes are wrong for passwords
 
 A general-purpose hash (SHA-256, for example) is designed to be fast. An attacker with a leaked table and a GPU can test billions of guesses per second. A password hash must be slow and tunable, so that each guess costs real computation. Adaptive algorithms let you raise the cost as hardware improves.
@@ -122,6 +156,25 @@ The same principle applies to JPA and JPQL: use named or positional parameters, 
 2. The encoded string (algorithm id, cost parameters, salt, and hash) is stored. The raw password is discarded.
 3. At login, `matches(raw, stored)` re-derives the hash with the stored salt and parameters and compares the results in constant time.
 4. If the algorithm or cost changed, you can re-hash the password on the user's next successful login.
+
+## Defensive checklist
+
+Most application defences fall into a few families. Use this table when you review a design.
+
+| Risk | Defence | Where to read more |
+|---|---|---|
+| SQL injection | Parameterised queries; allow-lists for identifiers | [JDBC](../07-jdbc-jpa/jdbc.md) |
+| Cross-site scripting (XSS) | Output encoding for the context; a Content Security Policy | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
+| Cross-site request forgery (CSRF) | Anti-CSRF tokens for cookie-authenticated requests; `SameSite` cookies | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
+| Excess privilege | Least privilege per service and per user; deny by default | [Spring Security Authorisation](spring-security-authorisation.md) |
+| Leaked credentials | A secrets store, injection at runtime, and rotation | [Secrets Management](secrets-management.md) |
+| Eavesdropping | TLS 1.2 or later everywhere; HSTS | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
+| Personal data in logs | Mask or omit personal data and secrets in logs and error responses | [Secrets Management](secrets-management.md) |
+| Vulnerable libraries | Dependency scanning in the build; timely upgrades | [Secure Coding and Supply Chain](secure-coding-and-supply-chain.md) |
+| Timing attacks on secrets | Constant-time comparison (`MessageDigest.isEqual`) | [Hashing, encryption, and HMAC](#hashing-encryption-and-hmac) |
+| Brute force on login | Rate limiting per account and per source; careful lockouts | [Password policy and login protection](#password-policy-and-login-protection) |
+
+Mask personal data as well as credentials in logs. An e-mail address or a card number in a log line is a breach in its own right.
 
 ## Common pitfalls
 

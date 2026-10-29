@@ -1,6 +1,6 @@
 # Practice Problems
 
-Practice problems train the habit of structuring an open-ended design. The eight common problems below cover different parts of the topics in this section: key generation, real-time messaging, global-scale feeds, concurrency control, and more. This page gives a general approach and then worked outlines for three of them: a URL shortener, a chat system, and a hotel booking system.
+Practice problems train the habit of structuring an open-ended design. The eight common problems below cover different parts of the topics in this section: key generation, real-time messaging, global-scale feeds, concurrency control, and more. This page gives a general approach and then worked outlines for nine of them: a URL shortener, a chat system, a hotel booking system, a rate limiter, a news feed, a payment system, a notification service, a video platform, and a ride-sharing system. The last four are shorter outlines that name the main decisions.
 
 ## Core concepts
 
@@ -142,6 +142,141 @@ Choose by contention level. A popular property on a sale date has high contentio
 !!! tip "Interview tip"
     **Q: Two users book the last room at the same moment. What happens?**
     Only one conditional update can succeed, because the database serialises writes to the same row. The other request sees zero rows updated and returns "no longer available". Mention the alternative of optimistic locking with a version column, and explain when each is preferable.
+
+## Worked outline 4: Rate limiter
+
+### Requirements
+- Functional: limit each API key to N requests per window; return a clear rejection when the limit is hit; allow different limits per route or plan.
+- Non-functional: the check adds little latency; the limit is enforced across all instances; the limiter must not become a single point of failure.
+
+### Estimates (assumptions)
+Estimate requests per second across the platform and the number of distinct keys. Each key needs one small counter per window, so storage is modest. The real cost is the number of store operations per request, since every request performs at least one.
+
+### API and data model
+- No public endpoint is needed. The limiter sits in front of other endpoints.
+- Rule table `rate_rules(client_plan, route, limit, window_seconds)`, cached in each instance and refreshed periodically.
+- Counter keys such as `rl:{apiKey}:{route}:{windowStart}` with a TTL slightly longer than the window.
+- Responses: `429 Too Many Requests` with `Retry-After`; optionally return remaining quota in headers.
+
+### High-level components
+- **Gateway filter or middleware** that identifies the caller and asks the limiter.
+- **Shared counter store** (Redis) that holds counts with TTLs.
+- **Rule cache** in each instance, so rule lookups do not hit the database on every request.
+- **Metrics and alerts** on rejection rates per key, to catch both abuse and misconfigured limits.
+
+### Trade-offs
+- Token bucket allows bursts and is smooth in practice; a fixed window is cheaper but lets a client send twice the limit around a window boundary.
+- A single Redis round trip per request adds latency. A local, in-memory limit with periodic sync is faster but less accurate across instances.
+- If the store is down, failing open protects availability, while failing closed protects the backend. Pick per route, based on what the backend can absorb.
+- Counting requests before authentication stops abuse early, but then unauthenticated traffic is limited by IP, which is coarser.
+
+!!! tip "Interview tip"
+    **Q: Two gateway instances check the same key at the same moment. How do you avoid letting both through?**
+    Make the check-and-update a single atomic operation in the store, such as a Redis script that increments the counter and checks the limit in one step. Reading the count, deciding in the application, and then writing back is a race that lets extra requests through.
+
+## Worked outline 5: News feed
+
+### Requirements
+- Functional: users follow other users; a user posts; the home timeline shows posts from followed accounts, newest first or ranked; the timeline pages as the user scrolls.
+- Non-functional: reading the timeline is fast; a new post appears within seconds; no post is lost once accepted; very popular accounts must not overload the system.
+
+### Estimates (assumptions)
+Estimate posts per day, average follower count, and the read rate for timelines. The key number is fan-out: posts per second multiplied by the average follower count. A few accounts with millions of followers dominate that product, so averages alone mislead.
+
+### API and data model
+- `POST /posts` with content; `POST /follows/{userId}`; `GET /timeline?cursor=...`.
+- Posts table keyed by post ID, which is time-ordered (see the Unique IDs notes in [High-Level Design](high-level-design.md)).
+- Follow graph table `follows(follower_id, followee_id)`, indexed both ways.
+- Timeline cache per user: a list or sorted set of post IDs, capped at a fixed length.
+
+### High-level components
+- **Post service** validates and stores the post, then publishes a `PostCreated` event.
+- **Fan-out workers** consume events from a queue and push the post ID into each follower's timeline cache.
+- **Timeline service** reads the cached list for a user, fetches post bodies in batch, and returns a cursor.
+- **Follow service** updates the graph and, for a new follow, backfills recent posts.
+- **Ranking step** (optional) reorders candidates by signals such as recency and engagement.
+
+### Trade-offs
+- Fan-out on write makes reads cheap, but a post by an account with ten million followers creates ten million cache writes.
+- Fan-out on read makes writes cheap, but every timeline request merges many followed accounts, which is slow for heavy followers.
+- A hybrid works well in practice: push posts from ordinary accounts on write, and for high-follower accounts, merge their recent posts into the timeline at read time.
+- Capped timeline caches bound memory, but old posts then need a slower path, such as the post store with a cursor.
+
+!!! tip "Interview tip"
+    **Q: What happens when a celebrity with millions of followers posts?**
+    Fan-out on write would enqueue millions of cache updates at once. Skip fan-out for accounts above a follower threshold, and merge their recent posts when a follower loads the timeline. Explain that this trades a slightly more expensive read for a bounded write, and that the threshold is a tunable setting.
+
+## Worked outline 6: Payment system
+
+### Requirements
+- Functional: accept a payment for an order; report its status; refund fully or partly; reconcile the ledger with the payment provider's records.
+- Non-functional: no double charges, even when a client retries; strong consistency for money movement; a full audit trail; availability for checkout, with a clear fallback when the provider is down.
+
+### High-level components
+- **Payment API** that takes an idempotency key from the client on every charge request.
+- **Payment service and ledger** that records each state change (created, authorised, captured, failed, refunded) as an append-only entry.
+- **Provider adapter** that calls the external gateway, with timeouts and retries limited to safe operations.
+- **Outbox and event publisher** so the order service learns the outcome without a dual write.
+- **Reconciliation job** that compares the ledger with the provider's daily report and flags mismatches.
+
+### Trade-offs
+- An idempotency key makes retries safe, but the server must store keys and their results for a time window.
+- A database transaction cannot undo a charge at the provider, so the design uses compensating refunds and reconciliation instead of assuming rollback.
+- Synchronous confirmation gives the user an answer now, but a slow provider then slows checkout; a pending state with a callback keeps checkout responsive at the cost of more states to handle.
+
+## Worked outline 7: Notification service
+
+### Requirements
+- Functional: send notifications by email, SMS, push, and in-app channels; respect each user's preferences and quiet hours; support templates and scheduled sends; report delivery status.
+- Non-functional: high throughput during bursts, such as a sale or an outage alert; at-least-once delivery with deduplication for the user; a failing channel must not block the others.
+
+### High-level components
+- **Notification API** that accepts an event or request and validates the template and recipient.
+- **Preference and rules service** that decides which channels apply and when.
+- **Queue per channel** so a slow SMS provider does not delay push or email.
+- **Channel workers** that call each provider, with retries, backoff, and a dead-letter queue for permanent failures.
+- **Status store** that records each attempt for support and analytics.
+
+### Trade-offs
+- Queues absorb bursts and isolate channels, but they add delay, so urgent alerts may need a priority queue.
+- At-least-once delivery means a user can receive a duplicate, so each message needs an ID that clients or workers can deduplicate on.
+- Fan-out to millions of users should use batched jobs, which trades a short delay for lower load on the providers.
+
+## Worked outline 8: Video platform (YouTube-style)
+
+### Requirements
+- Functional: upload a video; transcode it into several resolutions; play it back with adaptive bitrate; search and browse; show views and comments.
+- Non-functional: uploads can be large and slow; playback must start quickly anywhere in the world; the read path is far heavier than the write path; processing can be delayed without harming the user.
+
+### High-level components
+- **Upload service** that issues resumable upload URLs and stores raw files in object storage.
+- **Processing pipeline** driven by a queue, with workers that transcode into several bitrates and generate thumbnails.
+- **Metadata service** backed by a database for titles, owners, and status.
+- **CDN** that serves segmented video files close to viewers.
+- **View and comment counters** updated asynchronously, since exact real-time counts are rarely required.
+
+### Trade-offs
+- Transcoding everything up front wastes compute on videos nobody watches; transcoding on demand reduces cost but delays the first play.
+- Caching video segments at the edge gives fast playback, but a removed or private video must be purged from the CDN.
+- Approximate view counts are cheap to maintain at scale; exact counts cost more and are seldom worth it.
+
+## Worked outline 9: Ride-sharing system (Uber-style)
+
+### Requirements
+- Functional: riders request a ride; the system matches a nearby driver; both sides see live location; fares are computed; trips are rated and paid.
+- Non-functional: matching must be fast, often within seconds; driver location updates are frequent; the system must stay correct when a driver goes offline mid-trip.
+
+### High-level components
+- **Location service** that receives frequent driver position updates and keeps the latest position in memory, keyed by a geographic cell.
+- **Matching service** that finds nearby available drivers and offers a trip to one of them, with a timeout before trying the next.
+- **Trip service** with a state machine (requested, matched, in progress, completed, cancelled) that owns the trip record.
+- **Pricing service** that estimates fares and computes the final charge from the trip data.
+- **Event stream** that carries trip and location events to notifications, analytics, and payments.
+
+### Trade-offs
+- Geographic partitioning keeps matching local and fast, but a trip near a cell boundary needs a search across neighbouring cells.
+- Location updates can be lossy because only the latest value matters; this favours an in-memory store over a durable write per update.
+- Surge pricing balances supply and demand, but it must be explained to users and capped by policy.
 
 ## Quick recap
 - Structure every design: requirements, estimates, API and data model, components, deep dive, trade-offs.

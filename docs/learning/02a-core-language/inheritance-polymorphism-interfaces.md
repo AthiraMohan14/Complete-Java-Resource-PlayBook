@@ -34,6 +34,62 @@ public class Dog extends Animal {
 
 Every class extends `Object` implicitly. Java has single class inheritance: a class has at most one direct superclass.
 
+### Types of inheritance
+Inheritance is usually described in four shapes. Java supports three of them directly for classes, and supports the fourth only through interfaces.
+
+| Type | Shape | Support in Java |
+|---|---|---|
+| Single | One class extends one superclass | Yes, for classes |
+| Multilevel | A chain: C extends B, and B extends A | Yes, for classes |
+| Hierarchical | Several classes extend the same superclass | Yes, for classes |
+| Multiple | One class extends two or more classes | Not for classes; a class can implement many interfaces instead |
+
+Hybrid designs mix these shapes. They are allowed as long as no class ends up with two superclasses.
+
+```java
+class Vehicle {                          // base class
+    void start() { System.out.println("starting"); }
+}
+
+class Car extends Vehicle { }            // single: one superclass
+
+class ElectricCar extends Car { }        // multilevel: Vehicle -> Car -> ElectricCar
+
+class Bike extends Vehicle { }           // hierarchical: Car and Bike share Vehicle
+
+interface Electric {
+    default void charge() { System.out.println("charging"); }
+}
+
+interface Navigable {
+    default void route() { System.out.println("routing"); }
+}
+
+// Multiple inheritance of behaviour: one superclass, two interfaces
+class SmartCar extends Vehicle implements Electric, Navigable { }
+```
+
+Java avoids multiple class inheritance because of the diamond problem: if two superclasses define the same method, the compiler cannot tell which one to run. Default methods bring the same question into interfaces. When two interfaces provide a default method with the same signature, the implementing class must override it and choose which version to call:
+
+```java
+interface Left {
+    default String hello() { return "left"; }
+}
+
+interface Right {
+    default String hello() { return "right"; }
+}
+
+class Both implements Left, Right {
+    @Override
+    public String hello() {
+        return Left.super.hello() + " and " + Right.super.hello();
+    }
+}
+```
+
+Without the override, the class does not compile. The `Interface.super.method()` form names the version you want.
+
 ### Method overriding
 Overriding replaces an inherited instance method. The rules:
 
@@ -181,7 +237,40 @@ class C implements A, B {
 A class method always wins over an interface default with the same signature.
 
 ### Abstract class or interface?
-Use an interface to describe a capability that unrelated classes can share. Use an abstract class when you need shared state or a common base implementation. A class can implement many interfaces but extend only one class.
+Use an interface to describe a capability that unrelated classes can share. Use an abstract class when you need shared state, constructors, or a common base implementation with a hierarchy. A class can implement many interfaces but extend only one class.
+
+| Question | Interface | Abstract class |
+|---|---|---|
+| Instance state | None; only constants (`public static final`) | Any fields, with any visibility |
+| Constructors | None | Yes, to initialize shared state |
+| How many per class | A class may implement many | A class may extend one |
+| Method kinds | Abstract, default, static, and private (Java 9+) | Abstract and concrete, with any modifier |
+| Typical meaning | "can do" a capability | "is a" kind of thing |
+
+An abstract class fits a fixed algorithm with steps that subclasses fill in, which is the template method pattern. Mark the skeleton `final` so subclasses cannot change its order:
+
+```java
+public abstract class DataProcessor {
+    public final void process(String data) {          // fixed skeleton
+        save(clean(data));
+    }
+
+    protected String clean(String data) {             // default step
+        return data.trim();
+    }
+
+    protected abstract void save(String data);        // each subclass supplies this step
+}
+
+class ConsoleProcessor extends DataProcessor {
+    @Override
+    protected void save(String data) {
+        System.out.println("saved: " + data);
+    }
+}
+```
+
+Rule of thumb: if you need shared fields, constructors, or a single base class for a family of types, use an abstract class. If you need a capability that unrelated types can share, or several of them at once, use an interface.
 
 ### SOLID principles
 | Letter | Principle | Java example |
@@ -221,6 +310,7 @@ The example above follows the dependency inversion principle: tests can pass a f
 5. Default methods are inherited like any other method, and class methods take precedence over them.
 
 ## Common pitfalls
+- Adding an abstract method to an interface that other code implements. Every existing implementation breaks. Add a `default` method instead when the API is already in use.
 - Forgetting `super(...)` when the superclass has no no-argument constructor. The compiler reports an error.
 - Expecting field access to be polymorphic. It uses the declared type.
 - Confusing overloading with overriding and expecting the runtime type to pick an overload.

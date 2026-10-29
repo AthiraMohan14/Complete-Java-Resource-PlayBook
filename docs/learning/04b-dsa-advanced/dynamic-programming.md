@@ -104,6 +104,47 @@ public class Lcs {
 
 **Grid paths.** Count paths from the top-left to the bottom-right moving only right or down: `dp[r][c] = dp[r-1][c] + dp[r][c-1]`, with the first row and column set to 1.
 
+**Maximum subarray (Kadane's algorithm).** Let `endingHere` be the best sum of a subarray that ends at the current element. Each step either extends the previous subarray or starts fresh at the current element. The answer is the best `endingHere` seen. This runs in O(n) time and O(1) space. It needs at least one element.
+
+```java
+public class MaxSubarray {
+    static int maxSubarraySum(int[] nums) {
+        int best = nums[0];
+        int endingHere = 0;
+        for (int n : nums) {
+            endingHere = Math.max(n, endingHere + n);   // extend, or start fresh at n
+            best = Math.max(best, endingHere);
+        }
+        return best;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(maxSubarraySum(new int[]{-2, 1, -3, 4, -1, 2, 1, -5, 4})); // 6, from [4, -1, 2, 1]
+    }
+}
+```
+
+Starting `best` from `nums[0]` rather than `Integer.MIN_VALUE` keeps the answer correct when every element is negative.
+
+#### Kadane's algorithm as a one-state DP
+Kadane's algorithm fits the DP recipe with a single state: `endingHere[i]` is the best subarray sum that ends at index `i`. The recurrence is `endingHere[i] = max(nums[i], endingHere[i-1] + nums[i])`. Only the previous value is needed, so one variable replaces the array. Interview problems that ask for the maximum subarray, maximum circular subarray, or maximum product of a subarray (which needs a second running minimum) follow the same pattern. The array-focused version of the problem is in [Arrays and Strings](../../interview-questions/coding/arrays-strings-part-1.md).
+
+Trace of the example input, showing the state after each element:
+
+| Index | `nums[i]` | `endingHere` (extend or restart) | `best` so far |
+|---|---|---|---|
+| 0 | -2 | max(-2, 0 - 2) = -2 | -2 |
+| 1 | 1 | max(1, -2 + 1) = 1 | 1 |
+| 2 | -3 | max(-3, 1 - 3) = -2 | 1 |
+| 3 | 4 | max(4, -2 + 4) = 4 | 4 |
+| 4 | -1 | max(-1, 4 - 1) = 3 | 4 |
+| 5 | 2 | max(2, 3 + 2) = 5 | 5 |
+| 6 | 1 | max(1, 5 + 1) = 6 | 6 |
+| 7 | -5 | max(-5, 6 - 5) = 1 | 6 |
+| 8 | 4 | max(4, 1 + 4) = 5 | 6 |
+
+The answer is 6, from the subarray `[4, -1, 2, 1]`. In the code above, the initial `endingHere` is 0, which gives the same result because the first step takes `max(n, 0 + n)`.
+
 ### Less common DP families
 
 - **Interval DP:** `dp[i][j]` covers the subarray or substring from `i` to `j`. Typical for matrix-chain multiplication and "burst balloons". Loop by interval length.
@@ -140,6 +181,7 @@ A reliable method for any DP problem:
 - Memoisation is top-down recursion with a cache; tabulation fills a table bottom-up.
 - Define the state first, then the recurrence, then the base cases.
 - 0/1 knapsack iterates capacity in reverse; LCS and grid paths use 2-D tables.
+- Kadane's algorithm is a one-variable DP for the maximum subarray sum.
 - Use sentinels carefully: a value that means "unreachable" must not be a valid answer.
 
 **See also:** [Graphs](graphs.md), [Backtracking and Recursion](backtracking-recursion.md), [Greedy, Bit Manipulation and Hashing](greedy-bit-manipulation-hashing.md)

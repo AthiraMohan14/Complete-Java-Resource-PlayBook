@@ -123,6 +123,26 @@ The check and the state change must be in one transaction, otherwise a crash bet
 
 A common problem: a service must update its database and publish an event. If it writes the database and then publishes, a crash between the two loses the event. If it publishes first, a failed commit announces something that never happened. The transactional outbox fixes this: the service writes the event into an `outbox` table in the same transaction as the state change, and a separate relay reads the table and publishes events. The relay may publish a record twice, so consumers stay idempotent.
 
+## Why put a broker in between
+
+A messaging system moves data between services, processes, or servers without the sender and receiver calling each other directly. The sender produces a message, the receiver consumes it when it is ready, and neither needs to know the other's address, speed, or availability at that moment. The component that stores messages and hands them over is the **broker**.
+
+Two delivery shapes are common:
+
+- **Queue**: each message is taken by one consumer. Competing consumers share the work, which is useful for background jobs.
+- **Publish and subscribe**: publishers send messages to a topic, and every subscriber to that topic gets its own copy. Adding a subscriber does not change the publisher.
+
+Teams add a broker for these reasons:
+
+- **Buffering**: the broker absorbs bursts that the consumer cannot keep up with, so the producer is not slowed by a spike.
+- **Durable hand-off**: once the broker has accepted a message, the producer can continue even if the consumer is down, and the message waits.
+- **Decoupling**: producers and consumers can change, scale, and deploy independently, as long as the message contract holds.
+- **Asynchronous work**: the caller returns quickly and the consumer finishes the job later.
+- **Load spreading**: several consumers can share a queue or a partition set.
+- **Replay and new consumers**: some brokers keep messages for a window, so a new consumer can start from earlier data.
+
+A broker is not free. It adds an infrastructure component to run, delivery guarantees to choose, duplicates and out-of-order delivery to handle, and a new place where failures are hard to see. Use it where those costs buy something concrete, such as surviving a consumer outage or decoupling teams, rather than for every call between two services.
+
 ## Message patterns
 
 | Pattern | Shape | Example |

@@ -13,3 +13,10 @@ Command-line arguments, the REPL, documentation comments, packaging, and the Jav
 ### [Date & Time (java.time)](date-time.md)
 **LocalDate - Instant - Duration - Period - DateTimeFormatter - legacy Date and Calendar**
 The `java.time` API that replaced `java.util.Date` and `Calendar`, how to pick the right type, and why the legacy classes cause bugs.
+
+### More in this section
+
+### [Annotations and Reflection](annotations-and-reflection.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Annotations attach metadata to code, and reflection lets a program inspect and use that code at runtime. Together they explain how Spring finds your beans, how JUnit finds your...
+

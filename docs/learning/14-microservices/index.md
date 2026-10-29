@@ -29,3 +29,14 @@ Keeping data consistent across services without distributed locks, and the trade
 ---
 
 **See also:** [Messaging and Event-Driven Architecture](../13-messaging/index.md) | [Security](../10-security/index.md) | [Docker](../15-docker/index.md)
+
+### More in this section
+
+### [Service Discovery](service-discovery.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Service discovery lets a caller find the current network addresses of a service by its logical name, instead of a fixed host and port. Instances register themselves when they...
+
+### [Circuit Breakers in Spring Boot with Resilience4j](spring-circuit-breaker.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+A circuit breaker stops a service from repeatedly calling a dependency that is failing or slow. Once enough calls have failed, the breaker opens and calls fail fast, which...
+

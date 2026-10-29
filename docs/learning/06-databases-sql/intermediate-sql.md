@@ -17,6 +17,13 @@ LIMIT 20 OFFSET 40;
 
 `LIMIT` and `OFFSET` are not standard SQL. SQL Server uses `TOP` and `OFFSET ... FETCH`; Oracle uses `FETCH FIRST`. Large `OFFSET` values are slow because the database still reads the skipped rows. For deep pagination, use keyset pagination (`WHERE id > :lastSeenId ORDER BY id LIMIT 20`).
 
+Common row filters, with the syntax you will see most often:
+
+- Comparison operators (`=`, `<>`, `<`, `>=`) and `AND`, `OR`. Use parentheses whenever you mix `AND` and `OR`.
+- `IN (...)` for a fixed list, and `BETWEEN low AND high`, which includes both ends.
+- `LIKE` with `%` (any run of characters) and `_` (exactly one character). `'A%'` starts with A; `'%li%'` contains "li".
+- `IS NULL` and `IS NOT NULL`, because `= NULL` never matches.
+
 ### Joins
 
 A join combines rows from two tables on a condition.
@@ -35,6 +42,7 @@ INNER JOIN orders AS o ON o.customer_id = c.customer_id;
 | `FULL OUTER JOIN` | All rows from both; NULLs where there is no match (not in MySQL) |
 | `CROSS JOIN` | Every combination of rows (Cartesian product) |
 | Self-join | A table joined to itself, using two aliases |
+| `NATURAL JOIN` | Joins on every column name the two tables share. Avoid it: adding a column later silently changes the join |
 
 Find customers with no orders:
 
@@ -118,6 +126,87 @@ SELECT order_id,
 FROM orders;
 ```
 
+### Updating and deleting related rows
+
+Change rows in one table based on rows in another with `EXISTS` or a subquery. The join form of `UPDATE` differs by vendor: MySQL allows `UPDATE orders o JOIN ...`, while PostgreSQL and SQL Server use `UPDATE ... FROM`. The `EXISTS` form works in all three.
+
+```sql
+UPDATE customer
+SET tier = 'gold'
+WHERE EXISTS (
+    SELECT 1
+    FROM orders AS o
+    WHERE o.customer_id = customer.customer_id
+      AND o.total_cents > 100000
+);
+
+-- Remove orders whose customer no longer exists
+DELETE FROM orders
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM customer AS c
+    WHERE c.customer_id = orders.customer_id
+);
+```
+
+A foreign key normally prevents orphan rows, so the second statement matters mainly when a key was added late or constraints were disabled for a load. Before either statement runs, run the matching `SELECT` and check the row count.
+
+### Upsert: insert or update
+
+An upsert inserts a row when no matching row exists and updates it when one does. It suits syncing data from another system, where the same record can arrive more than once. Each database has its own syntax.
+
+MySQL uses `ON DUPLICATE KEY UPDATE`, which fires when a unique or primary key collides. The row alias below needs MySQL 8.0.19 or later. Older examples use `VALUES(column)` inside the update clause; it still works but is deprecated from 8.0.20.
+
+```sql
+INSERT INTO users (id, name, email, age)
+VALUES (1, 'John', 'john@example.com', 30) AS new_row
+ON DUPLICATE KEY UPDATE
+    name  = new_row.name,
+    email = new_row.email,
+    age   = new_row.age;
+```
+
+PostgreSQL uses `ON CONFLICT`. You name the conflict target, which must match a unique index or constraint. `EXCLUDED` refers to the row you tried to insert.
+
+```sql
+INSERT INTO users (id, name, email, age)
+VALUES (1, 'John', 'john@example.com', 30)
+ON CONFLICT (id) DO UPDATE SET
+    name  = EXCLUDED.name,
+    email = EXCLUDED.email,
+    age   = EXCLUDED.age;
+
+-- Keep the existing row and drop the new one
+INSERT INTO users (id, name, email)
+VALUES (1, 'John', 'john@example.com')
+ON CONFLICT (id) DO NOTHING;
+```
+
+SQL Server uses `MERGE`, which matches source rows against target rows and can insert, update, or delete in one statement.
+
+```sql
+MERGE INTO users AS target
+USING (VALUES (1, 'John', 'john@example.com', 30),
+              (2, 'Jane', 'jane@example.com', 25))
+      AS source (id, name, email, age)
+ON target.id = source.id
+WHEN MATCHED THEN
+    UPDATE SET name = source.name, email = source.email, age = source.age
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (id, name, email, age)
+    VALUES (source.id, source.name, source.email, source.age);
+-- Optional: WHEN NOT MATCHED BY SOURCE THEN DELETE removes target rows
+-- absent from the source. Add it only when that is what you want.
+```
+
+Without a native upsert, a common approach is to update first and insert only when the update changed no rows. This is not atomic. Two sessions can both see a missing row and both insert, so the unique constraint must still exist, and the losing insert must be caught and retried as an update.
+
+Performance notes:
+
+- A single upsert is atomic: the database performs the check and the write together.
+- One multi-row upsert is much faster than one statement per row.
+- The conflict target needs a unique index. Without one, the database cannot detect the conflict and you get duplicates.
+
 ## How it works / Step by step
 
 To write a multi-table query:
@@ -138,6 +227,7 @@ If a count looks too high after a join, a one-to-many relationship is multiplyin
 - Writing `COUNT(column)` when you meant `COUNT(*)`, and missing NULL rows.
 - Assuming `UNION` preserves order. Add `ORDER BY` at the end.
 - Using `OFFSET` for deep pagination on large tables.
+- Implementing an upsert as a plain read followed by a write, with no unique constraint behind it.
 
 !!! tip "Interview tip"
     **Q: How do you find rows in one table with no matching rows in another?**

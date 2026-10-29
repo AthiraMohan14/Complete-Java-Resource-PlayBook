@@ -21,3 +21,14 @@ Object-oriented design inside a service, with compiling Java examples of common 
 ### [Practice Problems](practice-problems.md)
 **URL shortener - chat system - hotel booking - requirements - components - trade-offs**
 How to approach a design problem step by step, with worked outlines for three of the eight common problems.
+
+### More in this section
+
+### [Replication, Sharding, and NoSQL](replication-sharding-nosql.md)
+**Core concepts - How it works / Step by step - Common pitfalls - Quick recap**
+Replication keeps copies of data on several nodes, which helps with read load and availability. Sharding splits data across nodes, which helps with write load and data size....
+
+### [Scalability and Failover](scalability-and-failover.md)
+**Core concepts - Java scaling patterns - How it works / Step by step - Common pitfalls - Quick recap**
+Scalability is the ability to handle more load by adding resources, and failover is the ability to keep serving when a component fails. In a Java service the two meet in the...
+

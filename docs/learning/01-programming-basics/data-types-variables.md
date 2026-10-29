@@ -130,6 +130,7 @@ Top-level classes can be `public` or package-private (default). Use `private` fo
 | `synchronized` | Methods, blocks | Only one thread at a time enters the guarded code |
 | `transient` | Fields | Excluded from default serialization |
 | `volatile` | Fields | Reads and writes go to main memory; visibility between threads, not atomicity |
+| `native` | Methods | The body is written in platform code outside Java (usually C or C++) and reached through JNI. The declaration has no body and ends with a semicolon |
 
 `transient` and `volatile` are used with serialization and concurrency, which are covered in later material. The example below shows the shape of each.
 
@@ -149,6 +150,46 @@ public class Session implements Serializable {
 }
 ```
 
+`native` is the one modifier in the table that does not add behaviour in Java code. The compiler only checks the declaration; the implementation lives in a shared library that the program loads, usually with `System.loadLibrary`. Java code calls the method like any other, and the JVM hands the call to the native code.
+
+```java
+public class Clock {
+    static {
+        System.loadLibrary("clock");   // loads libclock.so, or clock.dll on Windows
+    }
+
+    // No body here: the implementation is in the native library
+    public native long currentMillis();
+}
+```
+
+A few keywords are easy to get wrong:
+
+- `const` is a reserved keyword with no meaning. You cannot use it as a name or a modifier. Use `static final` for constants.
+- `strictfp` was needed for strict floating-point arithmetic before Java 17. Since 17 every floating-point operation is strict, so the modifier has no effect.
+
+### Local variable type inference with var (Java 10)
+`var` lets the compiler infer the type of a local variable from its initializer. The variable is still statically typed; only the spelling changes.
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+public class VarDemo {
+    public static void main(String[] args) {
+        var total = 0L;                             // long
+        var names = new ArrayList<String>();        // ArrayList<String>
+        List<String> copy = names;                  // the declared type can still be spelled out
+        names.add("Ada");
+        System.out.println(total + " " + copy);     // 0 [Ada]
+    }
+}
+```
+
+`var` is a reserved type name, not a keyword. Its use is limited to local variables, `for` loop variables, and try-with-resources variables. It cannot declare fields, method parameters, or return types. It also needs an initializer that gives a type: `var x = null;` and `var a = {1, 2};` do not compile.
+
+Use `var` when the right-hand side makes the type obvious, such as a constructor call. Spell the type out when the reader would have to guess it.
+
 ## How it works / Step by step
 
 1. The compiler checks that each local variable is assigned before it is read.
@@ -165,6 +206,7 @@ public class Session implements Serializable {
 - Leaving a `volatile` field unsynchronized and expecting atomic updates such as `count++`. It is not atomic.
 - Writing `long big = 10000000000;` without the `L` suffix. The literal is too large for `int` and fails to compile.
 - Declaring a local variable and reading it before assignment in one branch of an `if`.
+- Writing `var items = new ArrayList<>();`, which infers `ArrayList<Object>`. Give the type argument, as in `new ArrayList<String>()`.
 
 !!! tip "Interview tip"
     **Q: What is the default value of a local variable versus an instance variable?** Instance and static fields get defaults (`0`, `false`, `'\u0000'`, or `null`). Local variables have no default, and the compiler refuses to compile code that reads one before it is definitely assigned. The rule exists to prevent reading leftover or uninitialized values.

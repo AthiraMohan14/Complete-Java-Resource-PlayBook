@@ -1,11 +1,11 @@
-# Core Java Questions (Part 1 of 2)
+# Core Java Questions (Part 1 of 3)
 
 Frequently asked questions on the Java language, object-oriented design, strings, exceptions, and collections. Answer each one aloud before you open it.
 
 ---
 
 
-This page is split into 2 parts. Continue to [Part 2](core-java-part-2.md).
+This page is split into 3 parts. Continue to [Part 2](core-java-part-2.md).
 
 ## 1. What is the difference between the JDK, the JRE, and the JVM?
 
