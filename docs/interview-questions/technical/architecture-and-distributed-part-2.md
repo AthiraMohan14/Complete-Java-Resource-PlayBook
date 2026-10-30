@@ -1,6 +1,8 @@
-# Architecture and Distributed Systems Questions (Part 2)
+# Architecture and Distributed Systems Questions (Part 2 of 3)
 
 Questions on system design approach, service discovery, resilience, CAP and consistency, caching, load balancing, scaling the database, event sourcing, idempotency, and a worked design. Part 1 covers microservices, messaging, and distributed transactions. For system design rounds, state your assumptions first, then sketch the components, then discuss the trade-offs.
+
+Continued in [Part 3](architecture-and-distributed-part-3.md): monorepo or multi-repo, architecture styles, and designing an issue tracker.
 
 ---
 

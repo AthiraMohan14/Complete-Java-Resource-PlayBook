@@ -284,14 +284,14 @@ nav:
     - Core Java Questions (Part 1 of 3): interview-questions/technical/core-java-part-1.md
     - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 1 of 2)': interview-questions/technical/advanced-java-concurrency-part-1.md
     - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 2 of 2)': interview-questions/technical/advanced-java-concurrency-part-2.md
-    - Spring, Spring Boot, and Security Questions (Part 1 of 3): interview-questions/technical/spring-and-security-part-1.md
+    - Spring, Spring Boot, and Security Questions (Part 1 of 4): interview-questions/technical/spring-and-security-part-1.md
     - Data and Persistence Questions (Part 1 of 4): interview-questions/technical/data-and-persistence-part-1.md
     - Architecture and Distributed Systems Questions: interview-questions/technical/architecture-and-distributed.md
-    - DevOps, Cloud, Observability, and AI Questions (Part 1 of 2): interview-questions/technical/devops-cloud-and-ai-part-1.md
-    - DevOps, Cloud, Observability, and AI Questions (Part 2 of 2): interview-questions/technical/devops-cloud-and-ai-part-2.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 1 of 3): interview-questions/technical/devops-cloud-and-ai-part-1.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 2 of 3): interview-questions/technical/devops-cloud-and-ai-part-2.md
     - AI and Machine Learning Questions: interview-questions/technical/ai-and-machine-learning.md
-    - Architecture and Distributed Systems Questions (Part 1): interview-questions/technical/architecture-and-distributed-part-1.md
-    - Architecture and Distributed Systems Questions (Part 2): interview-questions/technical/architecture-and-distributed-part-2.md
+    - Architecture and Distributed Systems Questions (Part 1 of 3): interview-questions/technical/architecture-and-distributed-part-1.md
+    - Architecture and Distributed Systems Questions (Part 2 of 3): interview-questions/technical/architecture-and-distributed-part-2.md
     - Core Java Questions (Part 3 of 3): interview-questions/technical/core-java-part-3.md
     - Core Java Questions (Part 2 of 3): interview-questions/technical/core-java-part-2.md
     - Data and Persistence Questions (Part 3 of 4): interview-questions/technical/data-and-persistence-part-3.md
@@ -299,8 +299,11 @@ nav:
     - Data and Persistence Questions (Part 2 of 4): interview-questions/technical/data-and-persistence-part-2.md
     - Design Patterns Interview Questions (Part 2 of 2): interview-questions/technical/design-patterns-part-2.md
     - Design Patterns Interview Questions (Part 1 of 2): interview-questions/technical/design-patterns-part-1.md
-    - Spring, Spring Boot, and Security Questions (Part 3 of 3): interview-questions/technical/spring-and-security-part-3.md
-    - Spring, Spring Boot, and Security Questions (Part 2 of 3): interview-questions/technical/spring-and-security-part-2.md
+    - Spring, Spring Boot, and Security Questions (Part 2 of 4): interview-questions/technical/spring-and-security-part-2.md
+    - Architecture and Distributed Systems Questions (Part 3 of 3): interview-questions/technical/architecture-and-distributed-part-3.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 3 of 3): interview-questions/technical/devops-cloud-and-ai-part-3.md
+    - Spring and Security Questions (Part 4 of 4): interview-questions/technical/spring-and-security-part-4.md
+    - Spring, Spring Boot, and Security Questions (Part 3 of 4): interview-questions/technical/spring-and-security-part-3.md
   - Coding Questions:
     - Overview: interview-questions/coding/index.md
     - Arrays and Strings Coding Questions (Part 1 of 2): interview-questions/coding/arrays-strings-part-1.md
@@ -312,10 +315,11 @@ nav:
     - Graphs, Dynamic Programming, and Backtracking Coding Questions (Part 3 of 3): interview-questions/coding/graphs-dp-part-3.md
     - Stream API Problems (Part 1 of 2): interview-questions/coding/stream-api-problems-part-1.md
     - Stream API Problems (Part 2 of 2): interview-questions/coding/stream-api-problems-part-2.md
-    - Java-Specific Coding Problems (Part 1 of 3): interview-questions/coding/java-coding-problems-part-1.md
-    - Java-Specific Coding Problems (Part 2 of 3): interview-questions/coding/java-coding-problems-part-2.md
-    - Java-Specific Coding Problems (Part 3 of 3): interview-questions/coding/java-coding-problems-part-3.md
+    - Java-Specific Coding Problems (Part 1 of 4): interview-questions/coding/java-coding-problems-part-1.md
+    - Java-Specific Coding Problems (Part 2 of 4): interview-questions/coding/java-coding-problems-part-2.md
     - How to Approach Coding Questions: interview-questions/coding/how-to-approach-coding-questions.md
+    - Java Coding Problems (Part 4 of 4): interview-questions/coding/java-coding-problems-part-4.md
+    - Java-Specific Coding Problems (Part 3 of 4): interview-questions/coding/java-coding-problems-part-3.md
   - Behavioural Questions:
     - Overview: interview-questions/behavioural/index.md
     - STAR Method and Answer Structure: interview-questions/behavioural/star-method.md

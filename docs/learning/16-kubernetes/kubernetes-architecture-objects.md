@@ -174,6 +174,21 @@ kubectl port-forward pod/orders-7d9f-abcde 8080:8080   # Test the endpoint local
     **Q: What happens when you create a Deployment?**
     The API server stores the object in etcd. The Deployment controller creates a ReplicaSet. The ReplicaSet creates pods. The scheduler binds each pod to a node, and the kubelet starts the containers. The control loops keep running after that, so a failed pod is replaced automatically.
 
+## Orchestration
+
+Automation runs one task without a person. Orchestration coordinates many tasks and keeps them in the state you declared. Kubernetes is an orchestrator: you describe the desired state (for example, three replicas of a Deployment), and controllers continuously work to make the cluster match it.
+
+- The scheduler chooses a node for each new Pod based on resources, constraints, and affinity rules.
+- Controllers compare desired state with observed state and act on the difference, such as replacing a failed Pod.
+- Rolling updates replace Pods gradually, and `maxUnavailable` and `maxSurge` control how many are down or extra at once.
+- Probes tell the orchestrator when a container is alive or ready to receive traffic.
+
+Orchestration does not replace your deployment pipeline. The pipeline builds and promotes an image; Kubernetes keeps the running Pods matching the manifest that the pipeline applied.
+
+!!! tip "Interview tip"
+    **Q: How is orchestration different from automation?**
+    A script that runs `kubectl apply` is automation. The control loops that keep Pods running, reschedule them after a node fails, and roll out changes while respecting availability are orchestration. The difference is ongoing state management and recovery, not a single action.
+
 ## Quick recap
 - The control plane (API server, etcd, scheduler, controller manager) decides; nodes (kubelet, kube-proxy, runtime) run.
 - Pods are ephemeral and share a network identity within the pod.

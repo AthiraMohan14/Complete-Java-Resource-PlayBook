@@ -213,6 +213,46 @@ A typical three-tier application on AWS:
     **Q: How would you deploy a web app with a database on AWS?**
     Describe the layers: a load balancer in public subnets, application compute in private subnets, the database in private subnets with restricted security groups, secrets managed by a secrets service or IAM roles, and CloudWatch for monitoring. Justify the compute choice: EC2 for control, ECS or EKS for containers, Lambda for events.
 
+## IRSA
+
+IAM Roles for Service Accounts (IRSA) gives a pod on Amazon EKS AWS permissions through an IAM role, without access keys. The cluster's OIDC identity provider is registered in IAM. The pod's service account is annotated with a role ARN. The AWS SDK exchanges the projected service account token for temporary credentials with `sts:AssumeRoleWithWebIdentity`.
+
+The role's trust policy allows one service account in one namespace to assume it:
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": {
+    "Federated": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+  },
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {
+    "StringEquals": {
+      "oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:sub": "system:serviceaccount:orders:order-service",
+      "oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:aud": "sts.amazonaws.com"
+    }
+  }
+}
+```
+
+The service account carries the role annotation, and the pod uses that account:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-service
+  namespace: orders
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/order-service-role
+```
+
+Set `serviceAccountName: order-service` in the pod spec. The EKS webhook then injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE`, and the SDK's default credential chain does the exchange. Application code creates clients with no keys.
+
+!!! tip "Interview tip"
+    **Q: How does a pod get AWS permissions without credentials?**
+    The pod presents a Kubernetes-signed token. AWS STS checks it against the cluster's OIDC provider and the trust policy's `sub` condition, then returns temporary credentials for the role. Keep the `sub` condition specific, and give the role only the permissions the workload needs.
+
 ## Quick recap
 - Compute options range from EC2 (full control) to Lambda (no servers); containers run on ECS or EKS.
 - S3 is object storage, EBS is block storage, EFS is shared file storage.

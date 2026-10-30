@@ -278,6 +278,27 @@ Estimate posts per day, average follower count, and the read rate for timelines.
 - Location updates can be lossy because only the latest value matters; this favours an in-memory store over a durable write per update.
 - Surge pricing balances supply and demand, but it must be explained to users and capped by policy.
 
+## Worked outline 10: Jira-style issue tracker
+
+### Requirements
+- Functional: organisations create projects; each project has issues with fields, comments, attachments, and a history; each issue type follows a configurable workflow; users see and change issues according to project roles; users search with filters; watchers receive notifications.
+- Non-functional: the issue write path must be correct and never lose an update; search may lag a few seconds; the system serves many tenants with different sizes; permission checks must be fast on every request.
+
+### High-level components
+- **Project and configuration service** that stores projects, issue types, custom fields, and workflow definitions.
+- **Issue service** that writes issues in a relational database partitioned by tenant or project, and allocates per-project keys such as PROJ-123.
+- **Workflow engine** that validates each transition on the server against the workflow's states and conditions.
+- **Permission service** that answers view, edit, and transition checks from cached project roles.
+- **Activity log** that appends every change for audit and the activity feed.
+- **Search index** fed by change events, serving filtered queries.
+- **Notification service** that consumes events from a queue, resolves watchers and mentions, and sends in batches.
+
+### Trade-offs
+- Search is eventually consistent, so a user who just saved an issue may need to read it from the database instead.
+- Filtering search results by permission is always correct but costs work per query; precomputed visibility is faster but must be updated when roles change.
+- Per-project custom fields need a flexible schema, which is harder to index than fixed columns.
+- Batched notifications reduce noise on busy issues, at the cost of delay.
+
 ## Quick recap
 - Structure every design: requirements, estimates, API and data model, components, deep dive, trade-offs.
 - URL shortener: key generation, unique constraints, cache-heavy reads, asynchronous analytics.

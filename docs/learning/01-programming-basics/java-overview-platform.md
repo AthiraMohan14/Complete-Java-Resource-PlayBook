@@ -41,6 +41,37 @@ Since Java 9 the JDK includes a modular runtime, and the `jlink` tool can build 
 - **Jakarta EE (formerly Java EE):** enterprise APIs for servers, such as servlets and persistence. The project moved to the Eclipse Foundation and was renamed. Its packages moved from `javax.*` to `jakarta.*`.
 - **Java ME (Micro Edition):** a platform for embedded and mobile devices. It is now rare.
 
+### JavaFX and client-side toolkits
+Desktop and rich-client interfaces use a GUI toolkit rather than the core libraries alone. Two toolkits serve this need:
+
+- **Swing:** the older desktop toolkit. It is still in the JDK and appears in many existing applications.
+- **JavaFX:** a newer toolkit with a scene graph, CSS styling, and FXML layouts. Since Java 11 it is not bundled with the JDK. It is maintained as the OpenJFX project and added to a build as a separate dependency.
+
+A JavaFX application needs its modules declared in the build, such as with Maven or Gradle, and the runtime must include them. Check the version that matches your JDK before you start a project.
+
+```java
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.scene.control.Label;
+import javafx.stage.Stage;
+
+public class HelloFx extends Application {
+    @Override
+    public void start(Stage stage) {
+        Label label = new Label("Hello, JavaFX");
+        stage.setScene(new Scene(label, 300, 120));
+        stage.setTitle("Hello");
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);   // requires the JavaFX modules on the module path
+    }
+}
+```
+
+For web or server work, the enterprise editions and frameworks such as Spring Boot are the usual choice, not a client toolkit.
+
 ### Release cadence and LTS
 Oracle ships a new feature release every six months, and some releases are designated long-term support (LTS). The roadmap recommends a current LTS release, such as 21 or 25. Feature releases between LTS versions receive only short-term support.
 

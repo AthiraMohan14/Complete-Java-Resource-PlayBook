@@ -1,4 +1,4 @@
-# Architecture and Distributed Systems Questions (Part 1)
+# Architecture and Distributed Systems Questions (Part 1 of 3)
 
 Questions on monolith versus microservices, service boundaries, synchronous and asynchronous communication, Kafka and RabbitMQ, and distributed transactions. Part 2 covers resilience, data, and system design. For system design rounds, state your assumptions first, then sketch the components, then discuss the trade-offs.
 

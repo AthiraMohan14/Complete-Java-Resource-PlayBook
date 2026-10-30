@@ -399,6 +399,68 @@ Store the enum's `name()` when you persist it. Its `ordinal()` depends on declar
 
 ---
 
+## 28. What is JavaFX, and where is it used?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+JavaFX is Java's toolkit for building desktop and rich-client user interfaces. It provides a scene graph, layout containers, CSS styling, FXML markup for layouts, and media and graphics support. It is used for desktop applications, internal tools, and interactive dashboards. Since Java 11 it is no longer part of the JDK. It is a separate set of modules, published by the OpenJFX project, and a build must add it as a dependency.
+
+### Explanation
+JavaFX and Swing both build desktop interfaces in Java, but they differ in design:
+
+- **Swing** is an older toolkit that is still part of the JDK. It draws its own components on top of AWT and is widely found in existing applications.
+- **JavaFX** is newer. It uses a scene graph, supports CSS and FXML, and renders through a hardware-accelerated pipeline. Its APIs are designed for richer visual effects, animation, and media.
+
+Teams starting a new desktop application often choose JavaFX for its styling and layout model. Teams with a large Swing codebase usually keep Swing and migrate only parts of the interface when there is a clear benefit.
+
+### When to use / pitfalls
+- Do not assume JavaFX ships with `java`. A project on Java 11 or later must declare the JavaFX modules in its build file.
+- JavaFX is a client-side toolkit. For web or server work, use a framework such as Spring Boot.
+- Mention the version and build setup if you describe a JavaFX project, because the module setup differs from the older bundled JDK.
+
+**See also:** [Java overview and platform](../../learning/01-programming-basics/java-overview-platform.md), [Core Java Part 2](core-java-part-2.md)
+
+</details>
+
+---
+
+## 29. How do you balance performance improvements with code clarity?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Measure first with a profiler, or with a benchmark for a small piece of code. Keep the simplest correct version by default. Optimise only the hot paths that the measurements show matter. When a faster version is harder to read, document the trade-off next to the code and record the measured gain, so the next reader knows why it is there.
+
+### Explanation
+A typical sequence:
+
+1. Write the clear version and make it correct with tests.
+2. Measure the real workload, using a profiler such as the one in the IDE, or JMH for a microbenchmark. JMH handles JIT warm-up and dead-code elimination, which hand-written timing loops often get wrong.
+3. Find the hot path. If it takes a small share of total time, leave the code alone.
+4. If the hot path matters, make the smallest change that gives the gain, such as a better collection type, avoiding repeated allocation, or caching one expensive lookup.
+5. Add a short comment that states the reason and the measured effect, and keep the test that protects the behaviour.
+
+```java
+// Hot path: called for every row in an import. Profiling showed that a linear scan
+// dominated the run time, so a HashMap index replaces it. The linear version stays
+// in the tests as a reference for correctness.
+```
+
+### When to use / pitfalls
+- Premature optimisation makes code harder to change and often gains nothing. Start with the simple version.
+- Do not trust a single timing run. Repeat measurements and use realistic input sizes.
+- A change that speeds up a rarely used method adds complexity with no benefit.
+- Document the trade-off when you choose the less readable version, so a later change does not undo it without knowing the cost.
+
+**See also:** [Java overview and platform](../../learning/01-programming-basics/java-overview-platform.md), [Advanced Java Concurrency Part 1](advanced-java-concurrency-part-1.md)
+
+</details>
+
+---
+
 ## Quick recap
 
 - `HashMap` suits single-threaded code; `ConcurrentHashMap` rejects nulls and supports concurrent updates.

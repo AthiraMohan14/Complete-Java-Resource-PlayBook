@@ -235,6 +235,47 @@ To apply the principles to a feature:
     **Q: How do SOLID and dependency injection relate?**
     Dependency Inversion says policy should depend on abstractions. Dependency injection is the mechanism that supplies a concrete implementation to that abstraction at construction time. Spring's container is one way to do it; constructor calls in `main` are another.
 
+## Layered, hexagonal, and clean architecture
+
+These three styles answer one question: which way do dependencies point? Layered architecture stacks presentation, business logic, and persistence, with each layer calling the one below. Hexagonal architecture (ports and adapters) puts the domain at the centre, defines ports (interfaces) that the core needs, and attaches adapters for HTTP, databases, and messaging. Clean architecture uses rings with a dependency rule: source code dependencies point only inward, towards entities and use cases.
+
+| Style | Shape | Dependency direction | Good fit |
+|---|---|---|---|
+| Layered | Stacked layers | Downward, often down to persistence | Simple CRUD services |
+| Hexagonal | Core with ports and adapters | Adapters depend on the core | Several inputs and outputs, testable rules |
+| Clean | Concentric rings | Everything points inward | Large domains that must outlive frameworks |
+
+The key idea behind hexagonal and clean is that persistence is an outside detail. The use case depends on an interface it owns, and an adapter implements it:
+
+```java
+import java.util.Optional;
+
+record Order(String id) {}
+
+interface OrderRepository {              // port, owned by the core
+    Optional<Order> findById(String id);
+    void save(Order order);
+}
+
+class PlaceOrderUseCase {                // depends only on the port
+    private final OrderRepository orders;
+
+    PlaceOrderUseCase(OrderRepository orders) {
+        this.orders = orders;
+    }
+
+    void place(Order order) {
+        orders.save(order);
+    }
+}
+```
+
+A JPA repository adapter would implement `OrderRepository` in the infrastructure package, so the use case can be tested with a simple in-memory fake.
+
+!!! tip "Interview tip"
+    **Q: What is the difference between layered, hexagonal, and clean architecture?**
+    Layered is organised by technical role and is simple, but business code often ends up depending on persistence. Hexagonal and clean invert the dependency for outside systems, so the domain has no framework imports. They differ mostly in vocabulary: hexagonal talks about ports and adapters, clean names concentric rings and a use case layer. Choose the simplest style that keeps the domain testable.
+
 ## Quick recap
 
 - SOLID covers single responsibility, open/closed, Liskov substitution, interface segregation, and dependency inversion.

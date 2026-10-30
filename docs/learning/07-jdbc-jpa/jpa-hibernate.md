@@ -447,6 +447,33 @@ What happens during `entityManager.persist(order)` inside a transaction:
 3. At flush (before commit or before a query that needs it), Hibernate computes SQL from the changes and sends it.
 4. On commit, the transaction ends; the context closes, and the entities become detached.
 
+## StatelessSession
+
+A `StatelessSession` is a Hibernate session without a persistence context: no first-level cache, no dirty checking, no cascades, and no lazy loading. It suits bulk inserts and updates where tracking every entity wastes memory. Changes are not saved automatically, so call `update()` yourself. Entity listeners are not called. Open it with `emf.unwrap(SessionFactory.class).openStatelessSession()`, and for speed set `hibernate.jdbc.batch_size` and commit in chunks.
+
+```java
+import java.util.List;
+import org.hibernate.SessionFactory;
+import org.hibernate.StatelessSession;
+import org.hibernate.Transaction;
+
+class RowImporter {
+
+    static <T> void insertAll(SessionFactory sessionFactory, List<T> rows) {
+        StatelessSession session = sessionFactory.openStatelessSession();
+        try {
+            Transaction tx = session.beginTransaction();
+            for (T row : rows) {
+                session.insert(row);
+            }
+            tx.commit();
+        } finally {
+            session.close();
+        }
+    }
+}
+```
+
 ## Common pitfalls
 
 - Accessing a lazy collection outside the transaction (`LazyInitializationException`). Fetch it inside the transaction, or fetch-join it.

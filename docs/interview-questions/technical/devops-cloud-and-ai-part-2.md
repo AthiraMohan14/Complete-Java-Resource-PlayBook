@@ -1,6 +1,6 @@
-# DevOps, Cloud, Observability, and AI Questions (Part 2 of 2)
+# DevOps, Cloud, Observability, and AI Questions (Part 2 of 3)
 
-Continued from [Part 1](devops-cloud-and-ai-part-1.md).
+Continued from [Part 1](devops-cloud-and-ai-part-1.md). Continued in [Part 3](devops-cloud-and-ai-part-3.md): orchestration, Linux commands for deployment, log rotation and backups, and IRSA.
 
 ---
 

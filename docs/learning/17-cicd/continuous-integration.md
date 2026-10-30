@@ -162,6 +162,65 @@ Quality gates such as coverage thresholds and "no high-severity findings" belong
     **Q: What makes a CI pipeline useful?**
     It gives fast, reliable feedback on every change, and its failures block bad code. Speed, determinism, and trustworthy tests matter more than the number of checks. Build the artifact once, then promote that same artifact through environments.
 
+## Linux commands for deployment and maintenance
+
+A CI/CD job often ends by running commands on a Linux server. These are the ones to know, and to use with care:
+
+```bash
+java -version                                    # confirm the runtime
+systemctl status order-service                   # is the service running?
+journalctl -u order-service -n 200 --no-pager    # recent service logs
+ss -tlnp | grep 8080                             # which process listens on the port?
+df -h && free -m                                 # disk and memory
+curl -fsS http://localhost:8080/actuator/health  # health check, fails on HTTP errors
+```
+
+A deploy script should stop at the first error, keep the previous jar for rollback, and check health before reporting success:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+NEW_JAR="$1"
+install -m 0644 "$NEW_JAR" /opt/order-service/app.jar.new
+mv /opt/order-service/app.jar.new /opt/order-service/app.jar   # atomic on one filesystem
+systemctl restart order-service
+curl -fsS --max-time 5 http://localhost:8080/actuator/health > /dev/null
+```
+
+### Log rotation with logrotate
+
+`logrotate` runs daily on most distributions and rotates, compresses, and deletes old logs according to a rule file:
+
+```
+/var/log/order-service/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+Use `copytruncate` only when the application cannot reopen its log file. Test a rule with `logrotate -d` (dry run) and `logrotate -f` (force).
+
+### Backup script idea
+
+A nightly job dumps the database, removes dumps past the retention period, and copies them off the server:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+DIR=/var/backups/orders-db
+STAMP=$(date +%Y%m%d-%H%M%S)
+mkdir -p "$DIR"
+pg_dump -h db-host -U orders -d orders -Fc -f "$DIR/orders-$STAMP.dump"   # password from ~/.pgpass
+find "$DIR" -name 'orders-*.dump' -mtime +7 -delete
+```
+
+Schedule it with cron or a systemd timer, log its output, alert on failure, and test a restore regularly.
+
 ## Quick recap
 - CI builds and tests every change automatically; the build must be repeatable.
 - GitHub Actions uses workflows, jobs, and steps; Jenkins uses Jenkinsfiles with stages and agents; GitLab CI uses `.gitlab-ci.yml` and runners.

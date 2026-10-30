@@ -1,4 +1,4 @@
-# Java-Specific Coding Problems (Part 3 of 3)
+# Java-Specific Coding Problems (Part 3 of 4)
 
 Continued from [Part 2](java-coding-problems-part-2.md).
 

@@ -298,8 +298,108 @@ Publish/subscribe is usually described as an architectural style, while Observer
 
 ---
 
+## 13. What is the Command design pattern, and when would you use it?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+Command turns a request into an object. The object holds what to do and the data it needs, so it can be stored, queued, logged, passed around, or reversed. Use it when you need undo and redo, job queues or scheduled tasks, macro recording, or a history of operations. Strategy swaps how an operation is carried out inside a context, while Command packages a specific request so it can be executed later or in a different place.
+
+### Explanation
+A command usually has an `execute` method and, for undo, an `undo` method. The object that runs commands (the invoker) does not need to know what each one does:
+
+```java
+import java.util.ArrayDeque;
+import java.util.Deque;
+
+interface Command {
+    void execute();
+    void undo();
+}
+
+class TextEditor {
+    private final StringBuilder text = new StringBuilder();
+
+    void append(String s) {
+        text.append(s);
+    }
+
+    void deleteLast(int n) {
+        text.setLength(text.length() - n);
+    }
+
+    String content() {
+        return text.toString();
+    }
+}
+
+class AppendCommand implements Command {
+    private final TextEditor editor;
+    private final String value;
+
+    AppendCommand(TextEditor editor, String value) {
+        this.editor = editor;
+        this.value = value;
+    }
+
+    @Override
+    public void execute() {
+        editor.append(value);
+    }
+
+    @Override
+    public void undo() {
+        editor.deleteLast(value.length());
+    }
+}
+
+class CommandHistory {
+    private final Deque<Command> done = new ArrayDeque<>();
+
+    void run(Command command) {
+        command.execute();
+        done.push(command);
+    }
+
+    void undo() {
+        if (!done.isEmpty()) {
+            done.pop().undo();
+        }
+    }
+}
+
+public class Demo {
+    public static void main(String[] args) {
+        TextEditor editor = new TextEditor();
+        CommandHistory history = new CommandHistory();
+        history.run(new AppendCommand(editor, "Hello"));
+        history.run(new AppendCommand(editor, ", world"));
+        history.undo();
+        System.out.println(editor.content());   // Hello
+    }
+}
+```
+
+The same shape covers other uses. A thread pool or message queue stores `Runnable` or custom command objects and runs them later. A macro recorder stores a list of commands and replays them. Transactional systems record each change as a command so it can be rolled back.
+
+Contrast with Strategy: both use an interface and let the caller choose behaviour. A Strategy object is injected into a context that calls it as part of its own work, usually many times, and it has no notion of history. A Command object represents one request, usually created by a caller and handed to an invoker, and it is often stored, queued, or reversed.
+
+### When to use / pitfalls
+- Use Command when you need to queue, log, delay, or undo an action. For a simple call with no history, a method call or lambda is enough.
+- Undo needs the command to capture enough state to reverse itself. Deleting text by length, as above, only works if the text was not changed by something else in between.
+- In modern Java, a `Runnable` or `Supplier` lambda is often a lightweight command. Use a named class when the command needs undo or extra data.
+- Keep the receiver (here, `TextEditor`) responsible for the work; the command should delegate, not hold the business logic.
+
+**See also:** [Behavioural patterns](../../learning/design-patterns/behavioural-patterns.md), [SOLID and Anti-Patterns](../../learning/design-patterns/solid-and-anti-patterns.md), [Design Patterns Part 1](design-patterns-part-1.md)
+
+</details>
+
+---
+
 ## Quick recap
 
+- Command wraps a request as an object, enabling queues, logs, macros, and undo; Strategy swaps how work is done inside a context.
 - Decorator wraps an object to add behaviour, and the wrappers can be stacked.
 - Strategy is chosen by the client; State changes itself as the object moves between modes.
 - Proxy controls access to a real object; Decorator adds optional features the caller composes.

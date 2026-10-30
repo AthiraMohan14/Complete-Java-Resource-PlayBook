@@ -123,6 +123,41 @@ For a request to `GET /orders/42`:
 5. The controller returns a view name; the `ViewResolver` produces the page, or a REST return value goes through a message converter.
 6. `afterCompletion` runs whether or not an exception happened.
 
+## Server-side templating
+
+Server-side templating renders HTML on the server from the model, so the browser receives a finished page. Thymeleaf is a common choice in Spring Boot. Adding `spring-boot-starter-thymeleaf` makes Boot configure a view resolver that maps a returned view name to `src/main/resources/templates/<name>.html`.
+
+- A `@Controller` method returns the view name and fills the model. In a `@RestController`, the same return value would be written to the response body instead.
+- Thymeleaf uses natural templates: they are valid HTML, and attributes such as `th:text` add the dynamic parts.
+- `th:text` escapes output by default. Avoid `th:utext` with user input.
+- Choose server rendering when the server should own the page. Choose JSON when a separate client needs the data.
+
+```java
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+@Controller
+class GreetingController {
+
+    @GetMapping("/greet")
+    String greet(@RequestParam(defaultValue = "world") String name, Model model) {
+        model.addAttribute("name", name);
+        return "greeting";                          // resolves to templates/greeting.html
+    }
+}
+```
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+  <p th:text="'Hello, ' + ${name} + '!'">Hello, world!</p>
+</body>
+</html>
+```
+
 ## Common pitfalls
 
 - Returning an entity directly from a controller, which exposes internal fields and can trigger lazy loading.

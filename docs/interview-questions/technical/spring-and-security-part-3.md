@@ -1,4 +1,4 @@
-# Spring, Spring Boot, and Security Questions (Part 3 of 3)
+# Spring, Spring Boot, and Security Questions (Part 3 of 4)
 
 Continued from [Part 2](spring-and-security-part-2.md). These questions cover dependency injection, transactions, bean scopes, stereotypes, API security, and REST design.
 

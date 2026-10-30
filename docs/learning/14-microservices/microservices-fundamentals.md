@@ -189,6 +189,36 @@ Database changes complicate every strategy. Make schema changes backward compati
     **Q: When would you stay with a monolith?**
     When the team is small, the domain is still changing, the parts do not need independent scaling or deployment, and operational maturity is low. A modular monolith keeps clean boundaries without the distributed costs. Splitting later is much easier when the boundaries are already clear in the code.
 
+## Monorepo or multi-repo
+
+A monorepo keeps all services, shared libraries, contracts, and deployment files in one repository. A multi-repo layout gives each service its own repository and pipeline. Neither choice defines the architecture; the service boundary and the API contract do.
+
+| Concern | Monorepo | Multi-repo |
+|---|---|---|
+| Cross-service change | One commit can update a library and all its callers | Coordinated releases across repositories |
+| Shared code | Used directly from the same tree | Published as versioned artifacts |
+| Ownership | Coarser access control | Clear per-service ownership |
+| Build and CI | Needs path filters or a build graph to stay fast | Simple per service, but CI config is duplicated |
+| Version drift | Less likely, one place to pin versions | Likely unless dependencies are updated regularly |
+
+A typical monorepo has a parent build file that pins framework versions, a `libs/` folder for technical code (error handling, logging, messaging setup), a `contracts/` folder for API descriptions, and one folder per service. CI builds only the services affected by a change.
+
+```
+platform/
+  pom.xml
+  libs/common-web/
+  contracts/orders-api.yaml
+  services/order-service/
+  services/payment-service/
+  deploy/
+```
+
+Share technical libraries and contracts, not domain entities. If services share domain classes, a change to one forces releases of the others, and the system becomes a distributed monolith.
+
+!!! tip "Interview tip"
+    **Q: Monorepo or multi-repo for a large Spring Boot codebase?**
+    Pick by ownership and change frequency. A small team that changes services together benefits from one repository and atomic changes. Many autonomous teams usually prefer separate repositories, with versioned shared libraries and published contracts. In either case, pin versions in one place and keep domain classes out of the shared code.
+
 ## Quick recap
 
 - Draw service boundaries around bounded contexts and data ownership.

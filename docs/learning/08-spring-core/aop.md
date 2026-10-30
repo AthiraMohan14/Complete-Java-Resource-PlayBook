@@ -142,6 +142,18 @@ When a bean with matching advice is created:
 3. Calling a method on the proxy runs matching advice in order: `@Before`, then the target (through `@Around` if present), then `@AfterReturning` or `@AfterThrowing`, then `@After`.
 4. The target's return value or exception goes back to the caller.
 
+## Performance considerations
+
+Spring AOP adds a proxy call and an advice chain to each advised method call. For ordinary service methods this is small next to database or network calls, but it becomes visible on hot paths.
+
+- **Breadth.** Advising many beans or methods adds proxies and advice to each one. Narrow pointcuts to an annotation or a specific package.
+- **Runtime checks.** Static matches are computed once and cached per method. Pointcuts that test arguments or other runtime values are checked on every call.
+- **Advice body.** String building for logs, reflection, and locking run on every call. Check the log level before building messages.
+- **Around advice.** `@Around` needs a `ProceedingJoinPoint` and adds a frame. For simple before or after work, `@Before` or `@AfterReturning` is cheaper and clearer.
+- **Self-invocation.** A call inside the same class skips the proxy, so it has no advice cost, but the advice does not run at all. That is a correctness issue, not a speed gain.
+
+Avoid advice on getters, tight loops, and per-element methods. Keep I/O out of `@Around` advice. Measure with a profiler, such as Java Flight Recorder, or a JMH benchmark before concluding that AOP is the cause.
+
 ## Common pitfalls
 
 - Expecting advice on self-invoked methods. This is the most common AOP bug.

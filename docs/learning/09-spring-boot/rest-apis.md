@@ -110,6 +110,50 @@ A request with an unsupported media type gets `415 Unsupported Media Type`; one 
 4. The method runs, and its return value goes through a message converter (Jackson for JSON).
 5. Exceptions are routed to exception handlers (see [Exception Handling](exception-handling.md)).
 
+## @ModelAttribute
+
+`@ModelAttribute` binds query-string parameters and form fields to a bean's properties through Spring's data binder. It fits HTML forms and `application/x-www-form-urlencoded` or multipart posts. `@RequestBody` works differently: it passes the whole body to a message converter, normally Jackson for JSON. Form binding works field by field; body deserialisation reads the entire document.
+
+| | `@ModelAttribute` | `@RequestBody` |
+|---|---|---|
+| Source | Query string, form fields | Whole request body |
+| Typical content type | `application/x-www-form-urlencoded`, multipart | `application/json` |
+| Mechanism | `WebDataBinder` (type conversion, binding by name) | `HttpMessageConverter` (Jackson) |
+| Errors | `BindingResult` for type and validation errors | Unreadable body, usually `400` |
+
+```java
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+class OrderFormController {
+
+    @PostMapping(value = "/orders/form", consumes = "application/x-www-form-urlencoded")
+    String fromForm(@ModelAttribute OrderForm form) {
+        return form.getItem() + " x" + form.getQuantity();
+    }
+
+    @PostMapping(value = "/orders/json", consumes = "application/json")
+    String fromJson(@RequestBody OrderForm order) {
+        return order.getItem() + " x" + order.getQuantity();
+    }
+}
+
+class OrderForm {
+    private String item;
+    private int quantity;
+    public String getItem() { return item; }
+    public void setItem(String item) { this.item = item; }
+    public int getQuantity() { return quantity; }
+    public void setQuantity(int quantity) { this.quantity = quantity; }
+}
+```
+
+- Bind form data into a dedicated form class, not directly into a JPA entity, so clients cannot set fields they should not control.
+- A JSON body sent to a `@ModelAttribute` parameter is not parsed as JSON. Use `@RequestBody` for that.
+
 ## Common pitfalls
 
 - Returning JPA entities directly. This exposes internal fields, can trigger lazy-loading errors during serialisation, and couples your API to your schema. Map to DTOs.

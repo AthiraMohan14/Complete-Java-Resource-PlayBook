@@ -101,6 +101,29 @@ List<RegionRevenue> revenueSince(@Param("since") Instant since);
 
 ---
 
+## 41. What is a Hibernate StatelessSession and when do you use it?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+### Direct answer
+A `StatelessSession` is a lightweight Hibernate session with no persistence context. It has no first-level cache, no dirty checking, no cascading, and no lazy loading, so each operation maps directly to SQL. Use it for bulk inserts and updates, or for processing many rows where keeping every entity in memory would be wasteful. The trade-off is that you do the work the normal session would have done for you, such as calling `update()` when an object changes.
+
+### Explanation
+You open one from the Hibernate `SessionFactory`, not from the usual `EntityManager` path. Each call to `insert()`, `update()`, or `delete()` sends its statement to JDBC straight away, and JDBC batching can group them when a batch size is configured. Because nothing is tracked, the same row loaded twice gives two separate objects, and entity listeners and interceptors are not called.
+
+### When to use / pitfalls
+- Use it for imports, data migrations, and large batch jobs where memory use matters more than the convenience of managed entities.
+- A change to an object loaded from a stateless session is not saved automatically. Call `update()` for each change.
+- Do not expect cascades. Insert child rows explicitly.
+- Set a JDBC batch size and commit in chunks, or the batch runs as one large transaction.
+
+**See also:** [JPA and Hibernate](../../learning/07-jdbc-jpa/jpa-hibernate.md#statelesssession), [Data and persistence part 3](data-and-persistence-part-3.md)
+
+</details>
+
+---
+
 ## Quick recap
 
 - Use `LEFT JOIN` with `IS NULL` to find unmatched rows, and put filters on the right table in `ON` when you want to keep them.

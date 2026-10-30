@@ -197,6 +197,31 @@ Higher sources override lower ones for the same key. The exact list is in the Sp
 
 Note that a profile-specific file beats the default file, but an environment variable beats both. This is why a secret injected by the platform wins over anything committed to the repository.
 
+## @EntityScan and entity discovery
+
+Spring Boot's JPA auto-configuration looks for `@Entity` classes in the packages registered by `@SpringBootApplication`: the application class's package and its subpackages. Entities outside that tree are not known to Hibernate until you tell it where to look.
+
+- `@EntityScan(basePackages = "...")` or `basePackageClasses` extends the entity search to other packages.
+- It affects only entities. Spring beans still come from component scanning, and repositories still come from `@EnableJpaRepositories`.
+- Repositories outside the default package need `@EnableJpaRepositories` as well.
+- A missing entity usually surfaces at first use as a "Not a managed type" error.
+
+```java
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+
+@SpringBootApplication
+@EntityScan(basePackages = "com.example.billing.model")
+@EnableJpaRepositories(basePackages = "com.example.billing.repository")
+public class ShopApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ShopApplication.class, args);
+    }
+}
+```
+
 ## Common pitfalls
 
 - Putting `@SpringBootApplication` in a sub-package, so most beans are never scanned.

@@ -237,6 +237,85 @@ Make work visible in writing, agree on overlap hours for decisions, hand off wor
 
 ---
 
+## 9. How do you make sure technical choices support business goals?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+> **Template.** Adapt the bracketed parts to your own experience. Do not present the outline as a personal story.
+
+### Direct answer
+Start from the business metric the work is meant to move, link each technical decision to that metric, and check the result against it after release. A choice is justified when you can say which metric it should change and how you will know.
+
+### Explanation
+1. **Find the business metric.** [Name the metric, such as conversion rate, cost per order, or time to onboard a customer, and who owns it.]
+2. **Link the decision to it.** [Explain how the option you chose affects that metric, and what you gave up, such as time, flexibility, or cost.]
+3. **Show how you checked.** [Describe the measurement, the review date, and what you would change if the metric did not move.]
+
+### When to use / pitfalls
+- Avoid choosing a technology because it is fashionable. Ask what problem it solves for the business.
+- Do not claim a metric moved because of your work unless you measured it. Say what you checked and what you could not separate.
+
+**See also:** [STAR method](star-method.md), [Career motivation](career-motivation.md)
+
+</details>
+
+---
+
+## 10. How do you align a technical implementation with business objectives when priorities conflict?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+> **Template.** Adapt the bracketed parts to your own experience. Do not present the outline as a personal story.
+
+### Direct answer
+Restate the business objective and the constraint in plain terms, lay out the options with what each one costs against each objective, and take the decision to the person who owns the business priority. Record what was deferred and when it will be revisited.
+
+### Explanation
+1. **Clarify the objective.** [State the business goal in one sentence, and the constraint that conflicts with it, such as a deadline or a fixed budget.]
+2. **Lay out the options.** [Describe two or three options, and for each one the effect on the goal, the risk, and the cost to the team.]
+3. **Get a decision from the owner.** [Name the person or forum that set the priority, and how you brought the options to them.]
+4. **Record and revisit.** [Write down what was deferred, the reason, and the date to review it.]
+
+### When to use / pitfalls
+- Do not silently pick the technical option you prefer. Make the trade-off visible to the business owner.
+- A short written options note is usually more effective than a long meeting.
+
+**See also:** [Leadership and teamwork](leadership-and-teamwork.md), [Conflict and failure](conflict-and-failure.md)
+
+</details>
+
+---
+
+## 11. How do you decide whether to adopt a new technology for the stack?
+
+<details markdown="1">
+<summary>View Answer</summary>
+
+> **Template.** Adapt the bracketed parts to your own experience. Do not present the outline as a personal story.
+
+### Direct answer
+Test the technology against four questions: does it fit a problem we measured, can the team run it well, what does it cost to operate, and how would we leave it if it failed. Run a small pilot before any commitment to the wider stack.
+
+### Explanation
+1. **Problem fit.** [Name the measured problem the current stack does not solve well, and why this technology addresses it.]
+2. **Team skills.** [Describe who would own it, the training needed, and whether the team can support it on call.]
+3. **Operational cost.** [Cover hosting, licensing, monitoring, upgrades, and the effort to keep it secure.]
+4. **Exit plan.** [Explain how you would move off it: data export formats, an abstraction boundary, and the time it would take.]
+
+Then run a pilot with clear success criteria, and decide whether to adopt based on the results.
+
+### When to use / pitfalls
+- A new technology that solves no measured problem adds cost without a business gain.
+- Do not skip the exit plan. Lock-in is easy to create and hard to notice early.
+
+**See also:** [Career motivation](career-motivation.md), [STAR method](star-method.md)
+
+</details>
+
+---
+
 ## Quick recap
 
 - Leading without authority means building agreement, sharing information, and giving credit.
