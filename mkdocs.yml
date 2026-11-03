@@ -52,6 +52,7 @@ nav:
 - Feedback: feedback.md
 - Learning:
   - Overview: learning/index.md
+  - Glossary: learning/glossary.md
   - Programming Basics:
     - Overview: learning/01-programming-basics/index.md
     - Java Overview and Platform: learning/01-programming-basics/java-overview-platform.md
@@ -99,14 +100,14 @@ nav:
     - JIT Compilation and Performance Tools: learning/03b-jvm-internals/jit-and-performance-tools.md
   - Tooling & Utilities:
     - Overview: learning/03c-tooling-utilities/index.md
-    - Java Tools & Utilities: learning/03c-tooling-utilities/java-tools-utilities.md
-    - Date & Time (java.time): learning/03c-tooling-utilities/date-time.md
+    - Java Tools and Utilities: learning/03c-tooling-utilities/java-tools-utilities.md
+    - Date and Time (java.time): learning/03c-tooling-utilities/date-time.md
     - Annotations and Reflection: learning/03c-tooling-utilities/annotations-and-reflection.md
   - DSA Foundations:
     - Overview: learning/04a-dsa-foundations/index.md
-    - Arrays & Strings: learning/04a-dsa-foundations/arrays-strings.md
+    - Arrays and Strings: learning/04a-dsa-foundations/arrays-strings.md
     - Linked Lists: learning/04a-dsa-foundations/linked-lists.md
-    - Stacks & Queues: learning/04a-dsa-foundations/stacks-queues.md
+    - Stacks and Queues: learning/04a-dsa-foundations/stacks-queues.md
     - Trees: learning/04a-dsa-foundations/trees.md
     - Complexity, Sorting and Searching: learning/04a-dsa-foundations/complexity-sorting-searching.md
     - Heaps and Tries: learning/04a-dsa-foundations/heaps-and-tries.md
@@ -221,7 +222,10 @@ nav:
     - Low-Level Design: learning/19-system-design-fundamentals/low-level-design.md
     - Practice Problems: learning/19-system-design-fundamentals/practice-problems.md
     - Replication, Sharding, and NoSQL: learning/19-system-design-fundamentals/replication-sharding-nosql.md
+    - System Design Fundamentals: learning/19-system-design-fundamentals/fundamentals.md
+    - Building Blocks: learning/19-system-design-fundamentals/building-blocks.md
     - Scalability and Failover: learning/19-system-design-fundamentals/scalability-and-failover.md
+    - Worked Examples: learning/19-system-design-fundamentals/worked-examples.md
   - Observability and Monitoring:
     - Overview: learning/20-observability/index.md
     - Logging: learning/20-observability/logging.md
@@ -282,28 +286,28 @@ nav:
   - Technical Questions:
     - Overview: interview-questions/technical/index.md
     - Core Java Questions (Part 1 of 3): interview-questions/technical/core-java-part-1.md
-    - Core Java Questions (Part 3 of 3): interview-questions/technical/core-java-part-3.md
-    - Core Java Questions (Part 2 of 3): interview-questions/technical/core-java-part-2.md
     - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 1 of 2)': interview-questions/technical/advanced-java-concurrency-part-1.md
     - 'Advanced Java: Concurrency, JVM Memory, and GC (Part 2 of 2)': interview-questions/technical/advanced-java-concurrency-part-2.md
     - Spring, Spring Boot, and Security Questions (Part 1 of 4): interview-questions/technical/spring-and-security-part-1.md
-    - Spring, Spring Boot, and Security Questions (Part 2 of 4): interview-questions/technical/spring-and-security-part-2.md
-    - Spring, Spring Boot, and Security Questions (Part 3 of 4): interview-questions/technical/spring-and-security-part-3.md
-    - Spring and Security Questions (Part 4 of 4): interview-questions/technical/spring-and-security-part-4.md
     - Data and Persistence Questions (Part 1 of 4): interview-questions/technical/data-and-persistence-part-1.md
-    - Data and Persistence Questions (Part 2 of 4): interview-questions/technical/data-and-persistence-part-2.md
-    - Data and Persistence Questions (Part 3 of 4): interview-questions/technical/data-and-persistence-part-3.md
-    - Data and Persistence Questions (Part 4 of 4): interview-questions/technical/data-and-persistence-part-4.md
     - Architecture and Distributed Systems Questions: interview-questions/technical/architecture-and-distributed.md
-    - Architecture and Distributed Systems Questions (Part 1 of 3): interview-questions/technical/architecture-and-distributed-part-1.md
-    - Architecture and Distributed Systems Questions (Part 2 of 3): interview-questions/technical/architecture-and-distributed-part-2.md
-    - Architecture and Distributed Systems Questions (Part 3 of 3): interview-questions/technical/architecture-and-distributed-part-3.md
-    - Design Patterns Interview Questions (Part 1 of 2): interview-questions/technical/design-patterns-part-1.md
-    - Design Patterns Interview Questions (Part 2 of 2): interview-questions/technical/design-patterns-part-2.md
     - DevOps, Cloud, Observability, and AI Questions (Part 1 of 3): interview-questions/technical/devops-cloud-and-ai-part-1.md
     - DevOps, Cloud, Observability, and AI Questions (Part 2 of 3): interview-questions/technical/devops-cloud-and-ai-part-2.md
-    - DevOps, Cloud, Observability, and AI Questions (Part 3 of 3): interview-questions/technical/devops-cloud-and-ai-part-3.md
     - AI and Machine Learning Questions: interview-questions/technical/ai-and-machine-learning.md
+    - Architecture and Distributed Systems Questions (Part 1 of 3): interview-questions/technical/architecture-and-distributed-part-1.md
+    - Architecture and Distributed Systems Questions (Part 2 of 3): interview-questions/technical/architecture-and-distributed-part-2.md
+    - Core Java Questions (Part 3 of 3): interview-questions/technical/core-java-part-3.md
+    - Core Java Questions (Part 2 of 3): interview-questions/technical/core-java-part-2.md
+    - Data and Persistence Questions (Part 3 of 4): interview-questions/technical/data-and-persistence-part-3.md
+    - Data and Persistence Questions (Part 4 of 4): interview-questions/technical/data-and-persistence-part-4.md
+    - Data and Persistence Questions (Part 2 of 4): interview-questions/technical/data-and-persistence-part-2.md
+    - Design Patterns Interview Questions (Part 2 of 2): interview-questions/technical/design-patterns-part-2.md
+    - Design Patterns Interview Questions (Part 1 of 2): interview-questions/technical/design-patterns-part-1.md
+    - Spring, Spring Boot, and Security Questions (Part 2 of 4): interview-questions/technical/spring-and-security-part-2.md
+    - Architecture and Distributed Systems Questions (Part 3 of 3): interview-questions/technical/architecture-and-distributed-part-3.md
+    - DevOps, Cloud, Observability, and AI Questions (Part 3 of 3): interview-questions/technical/devops-cloud-and-ai-part-3.md
+    - Spring and Security Questions (Part 4 of 4): interview-questions/technical/spring-and-security-part-4.md
+    - Spring, Spring Boot, and Security Questions (Part 3 of 4): interview-questions/technical/spring-and-security-part-3.md
   - Coding Questions:
     - Overview: interview-questions/coding/index.md
     - Arrays and Strings Coding Questions (Part 1 of 2): interview-questions/coding/arrays-strings-part-1.md
@@ -317,9 +321,9 @@ nav:
     - Stream API Problems (Part 2 of 2): interview-questions/coding/stream-api-problems-part-2.md
     - Java-Specific Coding Problems (Part 1 of 4): interview-questions/coding/java-coding-problems-part-1.md
     - Java-Specific Coding Problems (Part 2 of 4): interview-questions/coding/java-coding-problems-part-2.md
-    - Java-Specific Coding Problems (Part 3 of 4): interview-questions/coding/java-coding-problems-part-3.md
-    - Java Coding Problems (Part 4 of 4): interview-questions/coding/java-coding-problems-part-4.md
     - How to Approach Coding Questions: interview-questions/coding/how-to-approach-coding-questions.md
+    - Java-Specific Coding Problems (Part 4 of 4): interview-questions/coding/java-coding-problems-part-4.md
+    - Java-Specific Coding Problems (Part 3 of 4): interview-questions/coding/java-coding-problems-part-3.md
   - Behavioural Questions:
     - Overview: interview-questions/behavioural/index.md
     - STAR Method and Answer Structure: interview-questions/behavioural/star-method.md
@@ -334,3 +338,11 @@ nav:
     - Part 2 - Data, JDBC & Spring: resources/full-stack-java-roadmap/part-2-data-spring.md
     - Part 3 - Production Engineering: resources/full-stack-java-roadmap/part-3-production-engineering.md
     - Part 4 - System Design, Interview & Projects: resources/full-stack-java-roadmap/part-4-design-interview-projects.md
+  - Time Boxed Roadmap:
+    - Overview: resources/time-boxed-java-roadmap/index.md
+    - Part 1 - Foundations, DSA and Data: resources/time-boxed-java-roadmap/phases-1-to-3.md
+    - Part 2 - Spring, Security and Messaging: resources/time-boxed-java-roadmap/phases-4-to-6.md
+    - Part 3 - Delivery, Design and Advanced Topics: resources/time-boxed-java-roadmap/phases-7-to-9.md
+    - Learning Resources and Tips: resources/time-boxed-java-roadmap/learning-resources-and-tips.md
+  - Code Review Guidelines: resources/code-review-guidelines/java-code-review-guidelines.md
+  - Cheat Sheets and Links: resources/cheat-sheets-and-links.md

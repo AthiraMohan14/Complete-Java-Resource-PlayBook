@@ -6,35 +6,35 @@ External references for quick lookups and deeper reading. The links are grouped 
 
 ## Cheat Sheets
 
-- [Devhints](https://devhints.io/): short syntax summaries for many languages and tools
-- [OverAPI](https://overapi.com/): quick API reference sheets
-- [Learn X in Y Minutes](https://learnxinyminutes.com/): compact tutorials for many languages
-- [exajobs/cheatsheet-collection](https://github.com/exajobs/cheatsheet-collection): a community-maintained list of cheat sheets
-- [Codecademy](https://www.codecademy.com/): interactive courses with reference pages
+- [Devhints](https://devhints.io/): brief syntax recaps for a wide range of languages and tools
+- [OverAPI](https://overapi.com/): fast lookup pages for APIs
+- [Learn X in Y Minutes](https://learnxinyminutes.com/): short, hands-on primers across many languages
+- [exajobs/cheatsheet-collection](https://github.com/exajobs/cheatsheet-collection): a GitHub list of reference sheets kept up by volunteers
+- [Codecademy](https://www.codecademy.com/): hands-on lessons that also include reference pages
 
 ## System Design
 
-- [ByteByteGo](https://bytebytego.com/): diagrams and articles on system design topics
-- [Grokking System Design Fundamentals](https://www.designgurus.io/course-play/grokking-system-design-fundamentals): a structured course on design basics
+- [ByteByteGo](https://bytebytego.com/): illustrated explanations and write-ups on design topics
+- [Grokking System Design Fundamentals](https://www.designgurus.io/course-play/grokking-system-design-fundamentals): an organized course that starts with the basics of design
 
 ## Java
 
-- [Java Concept of the Day](https://javaconceptoftheday.com/): short articles on individual Java features
-- [Baeldung](https://www.baeldung.com/): tutorials for Java, Spring, and related libraries
-- [HowToDoInJava](https://howtodoinjava.com/): Java and Spring tutorials with code samples
-- [Marco Behler, a guide to Java versions and features](https://www.marcobehler.com/guides/a-guide-to-java-versions-and-features): an overview of what changed between releases
+- [Java Concept of the Day](https://javaconceptoftheday.com/): brief posts that each explain one Java feature
+- [Baeldung](https://www.baeldung.com/): guides covering Java, Spring, and nearby libraries
+- [HowToDoInJava](https://howtodoinjava.com/): Java and Spring guides that include runnable snippets
+- [Marco Behler, a guide to Java versions and features](https://www.marcobehler.com/guides/a-guide-to-java-versions-and-features): a summary of how each release changed the language
 
 ## Data Structures and Algorithms
 
-- [GeeksforGeeks](https://www.geeksforgeeks.org/): explanations and worked problems for common algorithms
-- [LeetCode](https://leetcode.com/): practice problems with a test runner and discussion threads
+- [GeeksforGeeks](https://www.geeksforgeeks.org/): walkthroughs and solved examples for standard algorithms
+- [LeetCode](https://leetcode.com/): coding problems with an online judge and community solutions
 
 ## Security
 
-- [OWASP](https://owasp.org/): the Top 10 list, cheat sheets, and testing guides
-- [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog): vulnerabilities with evidence of active exploitation
+- [OWASP](https://owasp.org/): the Top 10 risk list, plus cheat sheets and testing guides
+- [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog): flaws that attackers are confirmed to be using in the wild
 
 ## Miscellaneous
 
-- [Crontab.guru](https://crontab.guru/): describes a cron expression in plain words and shows its next run times
-- [Atlassian: merging vs rebasing](https://www.atlassian.com/git/tutorials/merging-vs-rebasing): when to merge and when to rebase
+- [Crontab.guru](https://crontab.guru/): translates a cron expression into plain English and lists its upcoming run times
+- [Atlassian: merging vs rebasing](https://www.atlassian.com/git/tutorials/merging-vs-rebasing): a comparison of when a merge fits better than a rebase

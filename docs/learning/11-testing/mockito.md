@@ -1,12 +1,40 @@
 # Mocking with Mockito
 
-Mockito creates test doubles: objects that stand in for collaborators so you can test one class at a time. You stub what a dependency returns, then verify how your code used it. Interviewers ask about Mockito to see whether you know when a mock helps and when it hides a problem, such as an over-mocked test that passes while the real integration is broken.
+!!! note "In simple words"
+    A mock is a stand-in object for something a class depends on, such as a payment client. You script its answers, run the code under test, and then confirm how that code called it. Mock the things you cannot or should not run for real, and use real objects for simple logic.
 
-## Core concepts
+## Why it matters
+
+Few classes work alone. An order service talks to a payment gateway and a repository. A test of the service's own logic should not charge a card or write to a live database. Mockito provides those stand-ins with very little ceremony. The hard part is judgement: a test where every collaborator is mocked can pass even when the real components would fail together. Interviewers are checking whether you know both when a mock helps and when it quietly hides a defect.
+
+## How it works
+
+A Mockito test runs through four stages, and each stage maps to a method you will see below.
+
+1. `@Mock` or `mock(...)` creates a proxy for each collaborator. The proxy records every call and returns default values.
+2. `when(...).thenReturn(...)` scripts the answers for the calls the test cares about.
+3. The code under test runs and calls those proxies.
+4. `verify` checks the recorded calls against expectations. Under strict stubbing, a stub that was never used fails the test.
+
+The sequence below shows one test of the order service, where the gateway and the repository are both replaced.
+
+```mermaid
+sequenceDiagram
+    participant Test
+    participant Service as OrderService
+    participant Gateway as Mock gateway
+    participant Repo as Mock repository
+    Test->>Gateway: Stub charge to return true
+    Test->>Service: Place order
+    Service->>Gateway: Charge customer
+    Gateway-->>Service: true
+    Service->>Repo: Save paid order
+    Test->>Repo: Verify saved order with captor
+```
 
 ### The example under test
 
-The snippets on this page share one small service. The production types are shown once here so every example compiles against them.
+The snippets on this page all use one small service. The production types appear once here, so every later example compiles against the same declarations.
 
 ```java
 package com.example.orders;
@@ -40,9 +68,9 @@ class OrderService {
 
 ### Setting up Mockito with JUnit 5
 
-Annotate the test class with `@ExtendWith(MockitoExtension.class)`. The extension initialises `@Mock`, `@Spy`, `@InjectMocks`, and `@Captor` fields before each test. It also turns on strict stubbing, so a stub that a test never uses fails the test. This needs the `mockito-junit-jupiter` artifact.
+Put `@ExtendWith(MockitoExtension.class)` on the test class. Before each test, the extension builds the `@Mock`, `@Spy`, `@InjectMocks`, and `@Captor` fields. It also enables strict stubbing, which means an unused stub fails the test. The extension lives in the `mockito-junit-jupiter` artefact.
 
-`@InjectMocks` builds the class under test and passes in the mocks through its constructor.
+`@InjectMocks` constructs the class under test and hands it the mocks through its constructor.
 
 ```java
 package com.example.orders;
@@ -107,17 +135,18 @@ class OrderServiceTest {
 }
 ```
 
-### Stubbing
+### Scripting answers
 
-`when(...).thenReturn(...)` sets what a call returns. Related options:
+`when(...).thenReturn(...)` decides what a call returns. Other options:
 
 - `thenThrow(...)` makes the call throw.
-- `thenAnswer(...)` computes the result from the call's arguments.
-- For `void` methods, use `doThrow(...).when(mock).method(...)`, because `when(...)` cannot wrap a `void` call.
+- `thenAnswer(...)` derives the result from the arguments the call received.
+- A `void` method cannot be wrapped by `when(...)`, so script it with `doThrow(...).when(mock).method(...)`.
 
 ```java
 package com.example.orders;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -129,18 +158,20 @@ class StubbingExamples {
         OrderRepository repository = mock(OrderRepository.class);
 
         when(gateway.charge("customer-1", 500)).thenReturn(true);
-        when(gateway.charge("customer-2", 500)).thenAnswer(
+        when(gateway.charge("vip-customer", 500)).thenAnswer(
                 invocation -> invocation.<String>getArgument(0).startsWith("vip"));
-        doThrow(new IllegalStateException("disk full")).when(repository).save(org.mockito.ArgumentMatchers.any());
+        doThrow(new IllegalStateException("disk full")).when(repository).save(any());
     }
 }
 ```
 
 ### Argument matchers
 
-When you do not know the exact argument in advance, use a matcher such as `any()`, `anyString()`, `anyInt()`, `eq(...)`, or `argThat(...)`. There is one rule to remember: if any argument in a call uses a matcher, every argument in that call must use a matcher. Mix them and Mockito throws an `InvalidUseOfMatchersException`. Wrap a literal with `eq(...)` to fix this.
+Matchers such as `any()`, `anyString()`, `anyInt()`, `eq(...)`, and `argThat(...)` stand in for values you cannot predict. One rule is absolute: if any argument in a call is a matcher, every argument must be one. Mixing matchers with raw values raises `InvalidUseOfMatchersException`. Wrap the literal in `eq(...)` to resolve it.
 
 ```java
+package com.example.orders;
+
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -157,7 +188,7 @@ class GatewayStubbing {
         // Correct: every argument is a matcher.
         when(gateway.charge(anyString(), eq(500))).thenReturn(true);
 
-        // Wrong: mixes a matcher with a raw value and will fail at runtime.
+        // Wrong: a matcher mixed with a raw value fails at run time.
         // when(gateway.charge(anyString(), 500)).thenReturn(true);
     }
 }
@@ -165,7 +196,7 @@ class GatewayStubbing {
 
 ### Verification
 
-`verify` asserts that an interaction happened. Add `times`, `never`, `atLeastOnce`, or `atMost` to make the count explicit. `InOrder` checks the sequence across several mocks.
+`verify` confirms that an interaction took place. Add `times`, `never`, `atLeastOnce`, or `atMost` to state the expected count. `InOrder` confirms that calls happened in sequence across several mocks.
 
 ```java
 package com.example.orders;
@@ -200,19 +231,19 @@ class VerificationExamples {
 }
 ```
 
-Verify the interactions that define the behaviour, such as charging a card or writing a record. Avoid verifying every internal call. That ties the test to the current implementation and makes refactoring expensive.
+Verify the interactions that define the behaviour, such as a charge or a saved record. Verifying every internal call ties the test to the current implementation, and each refactor then breaks it.
 
 ### Argument captors
 
-An `ArgumentCaptor` records the object a mock received, so you can inspect its fields. This is useful when the object is built inside the code under test and you cannot easily predict it. The `OrderServiceTest` example above uses one. Outside the extension you create it with `ArgumentCaptor.forClass(...)`. A `@Captor` field is initialised only when `MockitoExtension` is in use.
+An `ArgumentCaptor` keeps a reference to the object a mock received, so you can examine its fields. It helps when the code under test builds the object and the test cannot predict its exact contents. `OrderServiceTest` uses one. Outside the extension, create it with `ArgumentCaptor.forClass(...)`. A `@Captor` field is initialised only when `MockitoExtension` is active.
 
 ### Mocks, spies, and real objects
 
 | Kind | Behaviour | Use when |
 |---|---|---|
-| Mock | Every method returns a default value unless stubbed | You need to replace a dependency completely |
-| Spy | Real methods run; you can stub or observe some calls | You need real behaviour but want to watch one call |
-| Real object | Your actual code | The logic is simple and has no external effects |
+| Mock | Every method returns a default value unless scripted | A dependency must be replaced completely |
+| Spy | Real methods run, while you can script or observe some calls | You need real behaviour plus a check on one call |
+| Real object | Your actual code runs | The logic is simple and free of external effects |
 
 ```java
 import static org.mockito.Mockito.spy;
@@ -231,41 +262,71 @@ class SpyExample {
 }
 ```
 
-Spies are useful when wrapping legacy code you cannot change yet. If you reach for them often, the class probably mixes responsibilities that should be separated.
+Spies help when you must wrap legacy code you cannot change yet. If you need them often, the class probably mixes responsibilities that should be split apart.
 
 ### What to mock
 
-Mock the things you do not control: a payment provider's client, an HTTP client, the system clock. Avoid mocking simple value objects, records, and utility methods. Use the real thing.
+Mock what you do not control: a payment provider's client, an HTTP client, the system clock. Leave value objects, records, and pure utility methods alone, and use the real thing.
 
-Mockito 5 uses the inline mock maker by default, which allows mocking `final` classes. Static methods can be mocked with `Mockito.mockStatic(...)` inside a try-with-resources block. Use this rarely, because static mocks couple tests to global state.
+Mockito 5 uses the inline mock maker by default, so `final` classes can be mocked. Static methods can be mocked with `Mockito.mockStatic(...)` inside a try-with-resources block. Do this sparingly, because static mocks bind tests to global state.
 
-## How it works / Step by step
+## Where it is used
 
-1. `@Mock` (or `mock(...)`) creates a proxy that records every call and returns configured answers.
-2. `when(...).thenReturn(...)` registers a stub for a specific call.
-3. The code under test runs and calls the mock.
-4. `verify` checks the recorded calls against your expectations. With strict stubs, a stub that was never used fails the test with `UnnecessaryStubbingException`.
+- Replacing payment, shipping, or email clients in service tests.
+- Exercising retry or fallback logic by making a dependency fail on command.
+- Confirming that a service emits the right message without a live broker.
+- Isolating a class from the clock by mocking its time source.
 
-## Common pitfalls
+## Benefits
 
-- Over-mocking. When every collaborator is mocked, the test passes while the real components would fail together.
+- Tests stay focused on one class, and failure paths that are hard to trigger for real become easy.
+- A slow or flaky collaborator, once stubbed, no longer slows or destabilises the suite.
+- Strict stubbing reports unused stubs, which keeps tests honest.
+- Captors let you assert on objects built inside the code under test.
+
+## Cons and limits
+
+- Heavy mocking can conceal integration faults, letting tests pass while real components fail.
+- Tests that verify many internal calls become brittle.
+- A mock cannot reproduce a query plan, a mapping rule, or a database constraint.
+- Static mocks and spies make tests harder to read and maintain.
+
+### Common pitfalls
+
+- Over-mocking, where nearly every collaborator is replaced and the test says little about real behaviour.
 - Verifying private details or every internal call, which breaks on each refactor.
-- Leaving unused stubs in place. Strict stubs flag them, which is a useful signal to delete them.
-- Mixing matchers and raw values in the same call.
-- Mocking records or simple value objects, which hides behaviour you actually want to test.
-- Using `@InjectMocks` with a constructor argument that has no matching mock. Mockito passes `null` for it, and the code fails later with a `NullPointerException`.
-- Relying on mocks to test persistence. A mocked repository cannot reveal bad queries or mapping errors; use a real database in an integration test.
+- Keeping stubs nobody uses. Strict stubbing flags them, which is a cue to delete them.
+- Combining matchers and raw values in the same call.
+- Mocking records or value objects, which hides behaviour you actually want to test.
+- Using `@InjectMocks` with a constructor parameter that has no matching mock. Mockito passes `null` for it, and the code later fails with a `NullPointerException`.
+- Testing persistence with mocks. A mocked repository cannot expose a bad query or a faulty mapping, so use a real database in an integration test.
+
+## Best practices
+
+- Use `@ExtendWith(MockitoExtension.class)` with `@Mock`, `@InjectMocks`, and `@Captor`.
+- Mock external systems and dependencies that are slow or non-deterministic, and little else.
+- Verify the interactions that matter to behaviour, such as a charge or a saved record.
+- Keep matchers consistent within each call, and wrap literals in `eq(...)`.
+- Delete unused stubs as soon as strict stubbing reports them.
+- Cover persistence and messaging with integration tests against real infrastructure.
 
 !!! tip "Interview tip"
     **Q: When would you not use a mock?**
-    When the collaborator is cheap, deterministic, and free of side effects, use the real object. For persistence, prefer a real database in an integration test, because a mock cannot show that a query or mapping works. Mocks fit best for external services and slow or non-deterministic dependencies. For the test structure around them, see [Unit Testing with JUnit 5](unit-testing-junit.md).
+    If the collaborator is cheap, predictable, and harmless, just use the genuine article. Storage behaviour cannot be verified through a fake, so exercise queries against a real database in integration tests. Stand-ins earn their keep for remote services and for dependencies that are slow or unpredictable. The surrounding structure is covered in [Unit Testing with JUnit 5](unit-testing-junit.md).
 
 ## Quick recap
 
-- Use `@ExtendWith(MockitoExtension.class)` with `@Mock`, `@InjectMocks`, and `@Captor`.
-- `when(...).thenReturn(...)` stubs a call; `verify` checks the interactions that matter.
-- Matchers must cover every argument in a call; wrap literals with `eq(...)`.
-- Argument captors let you inspect objects passed to collaborators.
-- Prefer real objects for simple logic. Keep mocks to external dependencies.
+- Pair `@ExtendWith(MockitoExtension.class)` with the `@Mock`, `@InjectMocks`, and `@Captor` annotations.
+- Script calls with `when(...)`, and check the interactions that matter with `verify`.
+- Each call's matchers must be all-or-nothing, so literals get wrapped in `eq(...)`.
+- Captors expose the objects that flowed out to collaborators.
+- Plain logic uses real objects; mocks are for external edges.
+
+## Official documentation
+
+- [Mockito Documentation](https://site.mockito.org/)
+- [JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+- [Java 21 API Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
 
 **See also:** [Unit Testing with JUnit 5](unit-testing-junit.md) | [Integration Testing](integration-testing.md) | [API Testing and Code Coverage](api-testing-and-coverage.md)

@@ -1,80 +1,69 @@
 # High-Level Design
 
-High-level design (HLD) describes the main components of a system, how they communicate, and where data lives. Interviewers expect you to choose an architecture style, place load balancers, caches, databases, queues, and CDNs, and justify each choice. This page covers the common building blocks and the trade-offs that decide between them.
+!!! note "In simple words"
+    High-level design is the map of a system: which big parts exist, how they send messages to each other, and where each kind of data is kept.
 
-## Core concepts
+High-level design (HLD) is about the big picture. You choose an architecture style, place the entry point, the caches, the databases, the queues, and the content network, and explain why each one is there. The details inside each box belong to low-level design, covered in [Low-Level Design](low-level-design.md).
+
+## Why it matters
+
+The first architecture decision shapes the team for years. A system split into many services too early adds network calls, deployment work, and debugging pain before anyone needs them. A single database used for everything becomes the bottleneck when traffic grows. Good high-level design picks the simplest shape that meets the stated requirements, and it leaves clear places where the shape can grow later.
+
+## How it works
 
 ### Architecture styles
-- **Layered (N-tier)**: presentation, business logic, and data access in separate layers. Simple to understand, and it is the usual starting point for a monolith.
-- **MVC**: model, view, and controller separate the data, the presentation, and the input handling. It describes the structure of a web application more than a deployment shape.
-- **Microservices**: independently deployed services, each owning its data. They allow independent scaling and team autonomy, at the cost of network calls, distributed data, and operational overhead.
-- **Event-driven**: components communicate by publishing and consuming events through a broker. They decouple producers from consumers and make asynchronous processing natural.
-- **Lambda architecture**: a batch layer and a speed layer process the same data, and a serving layer merges the results. It was designed for combining complete historical batch results with fast, approximate real-time results.
 
-Start with the simplest style that meets the requirements. A modular monolith is often a better starting point than microservices.
+- **Layered (N-tier)**: presentation, business logic, and data access live in separate layers. It is easy to understand and a common starting point for a monolith.
+- **Model-view-controller**: separates data, presentation, and input handling. It describes how a web application is structured inside, not how it is deployed.
+- **Microservices**: independently deployed services, each owning its own data. They allow independent scaling and team autonomy, at the cost of network calls, distributed data, and more operational work.
+- **Event-driven**: components publish and consume events through a broker. This decouples producers from consumers and makes asynchronous work natural.
+- **Lambda architecture**: a batch layer and a speed layer process the same data, and a serving layer merges their results. It combines complete historical results with fast, approximate, recent ones.
+
+Start with the simplest style that meets the requirements. A modular monolith, with clear module boundaries inside one deployable unit, is often a better first step than microservices. Move a module into its own service when a real reason appears, such as independent scaling or a separate team.
+
+```mermaid
+flowchart TD
+    Start[New system] --> Team{Team and domain size}
+    Team -- Small team --> Mono[Single deployable with clear modules]
+    Team -- Several teams --> Modular{Do modules change independently}
+    Modular -- No --> Mono
+    Modular -- Yes --> Services[Services with their own data]
+    Services --> Events[Events between services for async work]
+```
 
 ### Load balancing
-A load balancer distributes requests across healthy instances.
+
+A load balancer spreads requests across healthy instances. The main algorithms are:
 
 | Algorithm | How it chooses | Suits |
 |---|---|---|
-| Round-robin | Next server in turn | Similar servers, similar requests |
-| Least connections | Server with the fewest active connections | Requests with uneven duration |
-| Weighted | Servers with higher weight get more traffic | Mixed hardware capacity |
-| IP hash | Hash of the client IP | Simple session affinity |
-| Consistent hashing | Position on a hash ring | Caches and sharded stores that must move few keys when nodes change |
+| Round robin | Next server in turn | Similar servers and similar requests |
+| Least connections | Server with the fewest open connections | Requests that take uneven time |
+| Weighted | Servers with higher weight get more traffic | Machines of different sizes |
+| IP hash | Hash of the client address | Simple affinity, with some breakage when clients move networks |
+| Consistent hashing | Position on a hash ring | Caches and shards that must move few keys when nodes change |
 
-**Layer 4** load balancers route on transport information such as IP and port, which is fast and simple. **Layer 7** load balancers read application data such as HTTP headers and paths, which allows smarter routing and TLS termination at the cost of more processing.
-
-Consistent hashing is worth knowing in code. The ring maps both servers and keys to positions, and each key goes to the next server clockwise. Adding a server moves only a fraction of keys:
-
-```java
-import java.util.SortedMap;
-import java.util.TreeMap;
-
-public class HashRing {
-    private final TreeMap<Integer, String> ring = new TreeMap<>();
-
-    public void addServer(String server) {
-        ring.put(server.hashCode(), server);
-    }
-
-    public String serverFor(String key) {
-        if (ring.isEmpty()) {
-            throw new IllegalStateException("no servers on the ring");
-        }
-        SortedMap<Integer, String> tail = ring.tailMap(key.hashCode());
-        Integer position = tail.isEmpty() ? ring.firstKey() : tail.firstKey();
-        return ring.get(position);
-    }
-
-    public static void main(String[] args) {
-        HashRing ring = new HashRing();
-        ring.addServer("cache-a");
-        ring.addServer("cache-b");
-        System.out.println("user:42 goes to " + ring.serverFor("user:42"));
-    }
-}
-```
-
-Production rings add many virtual nodes per server to spread keys more evenly. This sketch omits that.
+A Layer 4 balancer routes on transport details such as IP and port, which is fast. A Layer 7 balancer reads HTTP details such as paths and headers, which allows smarter routing and TLS termination, at higher CPU cost. The ring behind consistent hashing is explained, with code, in [Building Blocks](building-blocks.md).
 
 ### Caching
-A cache stores frequently read data closer to the caller. Three common write patterns:
 
-- **Cache-aside**: the application reads the cache first; on a miss it loads from the database and fills the cache. Writes go to the database and the entry is invalidated or updated.
-- **Write-through**: writes go to the cache and the database synchronously. Reads are consistent with the cache, but writes are slower.
-- **Write-behind** (write-back): writes go to the cache and are persisted asynchronously. It is fast but risks losing data if the cache fails before the flush.
+A cache keeps data that is read often and closer to the caller. Three write patterns are common:
 
-**TTL** (time to live) bounds how long an entry can be stale. **Invalidation** is the harder part: deleting or updating entries when the source changes, and handling races between readers and writers. A distributed cache such as a **Redis cluster** shares the cache across application instances and partitions keys across nodes.
+- **Cache-aside**: the application checks the cache first. On a miss it loads from the database and stores the result. Writes update the database and then remove or update the cache entry.
+- **Write-through**: writes go to the cache and the database together. Reads see the latest data, but writes are slower.
+- **Write-behind**: writes go to the cache and reach the database later. This is fast, but a cache failure before the flush loses data.
+
+A time to live bounds how stale an entry may become. Invalidation is harder: it means removing or updating entries when the source changes, while handling races between readers and writers. A distributed cache such as a Redis cluster is shared by all instances and partitions keys across nodes.
+
+The sketch below shows cache-aside with `ConcurrentHashMap`. It has no expiry and no size limit, which a real cache must add:
 
 ```java
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 public class CacheAside<K, V> {
+
     private final Map<K, V> cache = new ConcurrentHashMap<>();
     private final Function<K, V> database;
 
@@ -83,101 +72,167 @@ public class CacheAside<K, V> {
     }
 
     public V get(K key) {
-        return Optional.ofNullable(cache.get(key))
-                .orElseGet(() -> {
-                    V value = database.apply(key);   // miss: load from the source of truth
-                    cache.put(key, value);
-                    return value;
-                });
+        V cached = cache.get(key);
+        if (cached != null) {
+            return cached;                       // hit
+        }
+        V loaded = database.apply(key);          // miss: read the source of truth
+        if (loaded != null) {
+            cache.put(key, loaded);
+        }
+        return loaded;
     }
 
-    public void onUpdate(K key) {
-        cache.remove(key);                           // invalidate on write
+    public void onWrite(K key) {
+        cache.remove(key);                       // invalidate so the next read reloads
+    }
+
+    public static void main(String[] args) {
+        CacheAside<String, String> users = new CacheAside<>(id -> "profile-of-" + id);
+        System.out.println(users.get("42"));     // miss, loads from the source
+        System.out.println(users.get("42"));     // hit, served from the map
     }
 }
 ```
 
-This in-memory version has no TTL and no size bound. A real cache adds both, and a distributed cache is needed when several instances must share entries.
-
 ### Database scaling
-- **Read replicas** copy data from a primary and serve reads. They scale read-heavy workloads, but replicas lag behind the primary, so reads after a write may be stale.
-- **Sharding** splits data across several databases. Common strategies are **range** (by key range, simple but can create hot spots), **hash** (even spread, but range queries get harder), and **consistent hashing** (adding shards moves few keys).
-- **Shard key choice** determines whether load spreads evenly. A key with many accesses concentrated on a few values creates hot shards.
-- **Cross-shard queries** need scatter-gather or a separate read model, and cross-shard transactions are costly.
-- **Primary-replica** (master-slave) replication has one writer. **Multi-primary** (master-master) accepts writes in several places and must resolve conflicts.
+
+- **Read replicas** copy data from a primary and serve reads. They scale read-heavy work, but they lag behind the primary, so a read straight after a write can be stale.
+- **Sharding** splits data across databases by a shard key. Range sharding keeps neighbouring keys together, which makes range scans easy, but new data can pile onto the newest range. Hash sharding spreads load evenly, but range queries must visit every shard. Consistent hashing lets you add shards while moving few keys.
+- **The shard key** decides whether load is even. A key with a few very common values creates hot shards.
+- **Cross-shard queries** need scatter-gather or a separate read model. Cross-shard transactions are costly.
+- **Primary-replica** replication has one writer. **Multi-primary** accepts writes in several places and must resolve conflicts.
+
+Deeper treatment of these choices is in [Replication, Sharding, and NoSQL](replication-sharding-nosql.md).
 
 ### Message queues
-Queues decouple producers from consumers and turn slow work into asynchronous tasks. A producer enqueues a message and returns; workers consume at their own pace. Queues smooth traffic spikes, allow retries, and distribute tasks across workers. They also mean the caller no longer knows when the work finished, so design for eventual completion and idempotent consumers.
 
-### CDNs
-A **content delivery network** caches static and cacheable content at edge locations near users. Benefits include lower latency, reduced origin load, and built-in protection against some traffic spikes. Compression and cache headers improve the effect. Dynamic, personalised responses are harder to cache and need careful rules.
+A queue separates the producer from the consumer. The producer records the work and returns. Workers take the work at their own pace. Queues smooth spikes, allow retries, and spread work over many workers. The cost is that the caller no longer knows when the work finished. Design for eventual completion, and make consumers idempotent, because redelivery is normal.
 
-### Synchronous versus asynchronous communication
-A synchronous call waits for the response, so the caller's latency includes the callee's work, and a slow callee slows the caller. An asynchronous message returns immediately, so the caller is decoupled, but the result arrives later and the caller must handle that. Use synchronous calls where the user needs the answer now, such as showing a price. Use asynchronous work where the user does not wait, such as sending a confirmation email or updating a search index.
+### Content delivery networks
 
-### OLTP versus OLAP
+A content delivery network (CDN) stores copies of static and cacheable responses at edge locations near users. It lowers latency, reduces load on the origin, and absorbs some traffic spikes. Compression and correct cache headers increase the benefit. Personalised responses are harder to cache, and they need explicit rules.
+
+### Synchronous and asynchronous calls
+
+A synchronous call waits for the answer. The caller's latency includes the callee's work, so a slow callee slows the caller. An asynchronous message returns at once. The caller is decoupled, but the result arrives later and must be handled.
+
+Use synchronous calls where the user needs the answer now, such as a price on a product page. Use asynchronous work where the user does not wait, such as sending a receipt or updating a search index.
+
+### OLTP and OLAP
+
 - **OLTP** (online transaction processing) handles many small, concurrent transactions, such as placing orders. It favours normalised schemas, indexes for point lookups, and strong consistency.
-- **OLAP** (online analytical processing) runs large scans and aggregations for reporting. It favours denormalised or columnar storage and is often fed by a copy of the transactional data.
+- **OLAP** (online analytical processing) runs large scans and aggregations for reports. It favours denormalised or columnar storage, often fed from a copy of the transactional data.
 
-Keep analytics off the transactional database. Replicate or stream changes into an analytical store so long reports do not slow checkout.
+Keep analytics away from the transactional database. Stream or replicate changes into an analytical store, so a long report does not slow checkout.
 
 ### API gateway
-An API gateway is the single entry point for external clients. It routes each request to the right service and handles cross-cutting concerns once, instead of in every service: authentication, TLS termination, rate limiting, request logging, and sometimes aggregation, where the gateway combines several internal calls into one response for a client.
 
-Keep the gateway thin. Routing and policy belong there; business rules belong in services. A gateway that holds business logic becomes a bottleneck that every team must change. Make it highly available, because every external request passes through it.
+An API gateway is the single entry point for external clients. It routes each request to the right service, and it handles cross-cutting concerns once, not in every service: authentication, TLS termination, rate limiting, request logging, and sometimes aggregation of several internal calls into one response.
+
+Keep the gateway thin. Routing and policy belong there, and business rules belong in services. A gateway full of business logic becomes a bottleneck that every team must change. It must also be highly available, because every external request passes through it.
 
 ### Rate limiting
-Rate limiting caps how many requests a client, key, or route may make in a period. It protects services from overload and from noisy callers.
 
-- **Token bucket**: tokens refill at a steady rate and each request spends one. It allows short bursts up to the bucket size.
-- **Leaky bucket**: requests drain at a fixed rate, which smooths traffic but adds queueing delay.
-- **Fixed window**: a counter per window, such as per minute. It is cheap, but traffic can double up at a window boundary.
-- **Sliding window**: counts over a moving period, which avoids the boundary problem at a higher cost.
+Rate limiting caps how many requests a client, key, or route may make in a period. It protects services from overload and noisy callers. Place the limiter at the gateway or in middleware. Keep the counters in a shared store, so every instance sees the same count. When the limit is reached, return `429 Too Many Requests` with a `Retry-After` header.
 
-Place the limiter at the gateway or in middleware, and keep the counters in a shared store such as Redis, so every instance sees the same count. When the limit is hit, return `429 Too Many Requests` with a `Retry-After` header. Decide whether the limiter fails open (allow traffic when the store is down) or fails closed (deny it).
+Decide whether the limiter fails open or fails closed when its store is unavailable. Failing open keeps traffic flowing, and failing closed protects the backend. The right answer depends on the route.
 
 ### Unique IDs
-Many designs need IDs that are unique across many servers without a central bottleneck.
 
-- **Database sequence**: simple and ordered, but every ID needs a round trip to one database.
-- **UUID**: no coordination needed, but 128 bits, not sortable by creation time in the usual form, and less friendly for indexes.
-- **Snowflake-style IDs**: a 64-bit number built from a timestamp, a machine ID, and a per-millisecond sequence. The timestamp keeps IDs roughly time-ordered, and each machine can generate IDs without coordinating. The machine IDs must be assigned without collisions.
+Many designs need IDs that are unique across many machines without a central bottleneck.
 
-Snowflake-style IDs suit feeds, messages, and orders where time-ordering helps. A machine that moves its clock backwards needs protection, or it can produce duplicates.
+- A **database sequence** is simple and ordered, but every ID needs a call to one database.
+- A **UUID** needs no coordination, but it is 128 bits and not ordered by time in its usual form, which weakens index locality.
+- A **Snowflake-style ID** packs a timestamp, a machine number, and a sequence into 64 bits. It is roughly time ordered, and each machine can create IDs alone, provided machine numbers are unique and the clock does not run backwards.
+
+Snowflake-style IDs suit feeds, messages, and orders where rough time order helps.
 
 ### API design and pagination
-Design the API before the storage, and make the contract explicit: resource names, methods, status codes, and request limits. For lists, choose a pagination style deliberately:
 
-- **Offset pagination** (`?page=5&size=20`) is easy to use, but the database must skip rows, so deep pages get slower. New rows inserted during paging can also shift results.
-- **Cursor or keyset pagination** (`?after=<last-seen-key>`) asks for rows after a known position, so cost stays flat and results do not shift. It is harder for clients who want to jump to page 40.
+Design the API before the storage, and make the contract explicit: resource names, methods, status codes, and request limits. For lists, pick the paging style on purpose.
 
-Use cursors for feeds and large, changing collections. Offset pagination is fine for small, stable lists.
+- **Offset pagination** (`page` and `size` parameters) is easy to use, but the database must skip rows, so deep pages get slower. Rows inserted while a client pages can also shift results.
+- **Cursor or keyset pagination** asks for rows after a known position. The cost stays flat, and results do not shift. It is harder for a client that wants to jump straight to page 40.
 
-## How it works / Step by step
-Designing the path of a read request in a typical web system:
-1. A DNS entry and a CDN serve static assets from the edge.
-2. A Layer 7 load balancer routes the API call to a healthy service instance.
-3. The service checks a distributed cache; on a miss it reads a replica or the shard that owns the key.
-4. Writes go to the primary or the correct shard, and an event is published to a queue.
-5. Consumers update derived data, such as search indexes or analytics stores, asynchronously.
+Use cursors for feeds and large collections that change often. Offset pagination is fine for small, stable lists. The SQL below shows keyset paging, which is what a cursor usually becomes in the database:
+
+```sql
+-- first page
+SELECT id, title, created_at
+FROM posts
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+
+-- next page, using the last row seen on the previous page as the cursor
+SELECT id, title, created_at
+FROM posts
+WHERE (created_at, id) < (:last_created_at, :last_id)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+```
+
+The `id` breaks ties when two posts share a timestamp. Without it, rows could be skipped or repeated at a page boundary.
+
+## Where it is used
+
+- Designing a new platform, where the architecture style and the storage plan are chosen together.
+- Planning the read path of a product catalogue, with a CDN, a cache, and replicas.
+- Splitting a monolith when one module needs its own scaling or team.
+- Reviewing a system before a launch that will raise the load sharply.
+
+## Benefits
+
+- A simple architecture is cheaper to build, run, and debug.
+- Caches, replicas, and queues each relieve one specific bottleneck, so you add them only where the numbers call for them.
+- A thin gateway keeps cross-cutting rules consistent across services.
+- Keyset pagination keeps deep pages fast and stable.
+
+## Cons and limits
+
+- Microservices add network calls, distributed data, and operational overhead, and they can slow a small team down.
+- Caches can serve stale data, and invalidation is easy to get wrong.
+- Replicas lag, and a read after a write may not see the write.
+- Sharding makes some queries and transactions expensive or impossible without extra design.
+- A queue does not guarantee exactly-once processing, so consumers must handle duplicates.
+
+## Best practices
+
+- Choose the simplest architecture that meets the requirements, and write down the trigger for splitting it.
+- Give every cache a time to live and a clear invalidation rule.
+- Pick a shard key that matches the main queries and spreads the load.
+- Route reads that must be fresh to the leader, and accept lag elsewhere.
+- Keep analytics off the transactional database.
+- Make consumers idempotent, and make the gateway thin.
+- Publish a request path diagram, and review it with the team.
 
 ## Common pitfalls
-- Adding microservices before the team and the domain need them.
-- Caching without a plan for invalidation, which serves stale data indefinitely.
+
+- Adding microservices before the domain and the team need them.
+- Caching without a plan for invalidation, which serves old data indefinitely.
 - Choosing a shard key that concentrates traffic on one shard.
-- Reading from a replica immediately after a write and expecting to see it.
+- Reading from a replica straight after a write and expecting to see the write.
 - Sending analytical queries to the primary transactional database.
-- Assuming a queue gives exactly-once processing. Design consumers to be idempotent.
+- Assuming a queue delivers each message exactly once.
 
 !!! tip "Interview tip"
     **Q: How would you scale the read path of a product catalogue?**
-    Put a CDN in front of cacheable pages and images, add a distributed cache with cache-aside and a TTL, and serve remaining reads from replicas. Name the consistency trade-off: a price change may take the TTL to appear, so decide whether that is acceptable or whether writes must invalidate the cache.
+    Put a CDN in front of cacheable pages and images. Add a distributed cache with cache-aside and a time to live. Send the remaining reads to replicas. Then name the trade-off: a price change may take as long as the time to live to appear. Decide whether that delay is acceptable, or whether writes should invalidate the cache directly.
 
 ## Quick recap
-- Pick an architecture style that matches the team and domain; start simple.
-- Load balancers choose algorithms and layers; consistent hashing minimises key movement.
-- Cache-aside, write-through, and write-behind trade freshness, speed, and durability.
-- Replicas scale reads with lag; sharding scales writes with hot-spot and cross-shard costs.
-- Queues decouple work; CDNs serve edge content; keep OLTP and OLAP apart.
 
-**See also:** [Core Concepts](core-concepts.md), [Low-Level Design](low-level-design.md), [Practice Problems](practice-problems.md), [Redis and Caching](../12-caching-performance/index.md)
+- Pick an architecture style that matches the team and the domain, and start simple.
+- Load balancers use simple or hash-based algorithms; consistent hashing moves few keys when nodes change.
+- Cache-aside, write-through, and write-behind trade freshness, speed, and durability.
+- Replicas scale reads with lag. Sharding scales writes but brings hot spots and cross-shard costs.
+- Queues decouple work. CDNs serve edge content. Keep OLTP and OLAP apart.
+- Use cursor pagination for large, changing lists.
+
+## Official documentation
+
+- [Microservices by Martin Fowler](https://martinfowler.com/articles/microservices.html)
+- [Kubernetes Ingress concept](https://kubernetes.io/docs/concepts/services-networking/ingress/)
+- [Redis documentation](https://redis.io/docs/latest/)
+- [Apache Kafka documentation](https://kafka.apache.org/documentation/)
+
+**See also:** [Core Concepts](core-concepts.md) | [Low-Level Design](low-level-design.md) | [Building Blocks](building-blocks.md) | [Practice Problems](practice-problems.md) | [Redis and Caching](../12-caching-performance/spring-cache-and-redis.md)

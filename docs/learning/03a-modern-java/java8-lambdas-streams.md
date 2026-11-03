@@ -1,14 +1,19 @@
 # Java 8: Lambdas, Method References and Streams
 
-Java 8 added lambda expressions, method references, and the Stream API. Together they let you describe what to compute over a collection instead of writing the loop by hand. Interviewers use this topic to check that you know the difference between lazy intermediate operations and eager terminal operations, and when a stream is the wrong tool.
+!!! note "In simple words"
+    A lambda is a short piece of code you can pass around as a value. A stream is a chain of steps that you apply to a collection, such as filter, then transform, then collect. You describe what you want, and Java runs the steps.
+
+## Why it matters
+
+Before Java 8, changing behaviour meant writing a named class for each case, and transforming data meant writing loops by hand. Lambdas, method references, and the Stream API made that code shorter and easier to read. Interviewers use this topic to check that you understand functional interfaces, the difference between lazy intermediate operations and eager terminal operations, and when a stream is the wrong tool.
 
 ---
 
-## Core concepts
+## How it works
 
 ### Functional interfaces
 
-A functional interface has exactly one abstract method. A lambda is an instance of one. The `@FunctionalInterface` annotation asks the compiler to check that rule. It is optional, but it documents intent and gives a clear error if someone adds a second abstract method later.
+A functional interface has exactly one abstract method. A lambda is an instance of one. The `@FunctionalInterface` annotation asks the compiler to check that rule. It is optional, but it documents intent and gives a clear error if someone later adds a second abstract method.
 
 ```java
 @FunctionalInterface
@@ -26,7 +31,7 @@ public class DiscountDemo {
 
 ### Lambda syntax
 
-A lambda has a parameter list, `->`, and a body. Parentheses are optional for a single parameter with an inferred type. Use braces and `return` when the body has more than one statement.
+A lambda has a parameter list, `->`, and a body. Parentheses are optional for one parameter whose type is inferred. Use braces and an explicit `return` when the body has more than one statement.
 
 ```java
 import java.util.function.BinaryOperator;
@@ -45,18 +50,18 @@ public class LambdaSyntax {
             return b;
         };
 
-        oneArg.accept(zeroArgs.get());   // no parameters
+        oneArg.accept(zeroArgs.get());       // no parameters
         System.out.println(add.apply(2, 3)); // 5
         System.out.println(max.apply(2, 3)); // 3
     }
 }
 ```
 
-A lambda can read a local variable only if that variable is effectively final, meaning it is never reassigned after initialisation. The rule exists because the lambda can outlive the method call that created it. Java captures a copy of the value, so allowing reassignment would make the copy misleading.
+A lambda can read a local variable only if that variable is effectively final, meaning it is never reassigned after it is set. The lambda may run after the method that created it has returned. Java copies the value into the lambda, so allowing reassignment would make the copy misleading.
 
 ### Method references
 
-A method reference is a shorter way to write a lambda that only calls an existing method. The `::` operator names the method directly instead of repeating the call.
+A method reference is a shorter form of a lambda that only calls an existing method. The `::` operator names the method, so you do not repeat the call.
 
 | Form | Example | Equivalent lambda |
 |---|---|---|
@@ -81,7 +86,7 @@ public class MethodRefs {
 
 ### Passing behaviour into methods
 
-Before Java 8, a method that needed to vary its behaviour took an interface with one method and needed a named class for each case. A lambda lets the caller pass the rule inline. The method below accepts a `Predicate` and sums the numbers that satisfy it.
+Before Java 8, a method that needed to vary its behaviour took an interface with one method, and every case needed its own named class. A lambda lets the caller pass the rule inline. The method below accepts a `Predicate` and sums the numbers that match it.
 
 ```java
 import java.util.List;
@@ -104,7 +109,7 @@ public class PassBehaviour {
 }
 ```
 
-The same idea works for a declarative primality test. The stream form reads as "greater than one, and no divisor in range", which is closer to the definition than a counting loop:
+The same idea works for a declarative primality test. The stream version reads close to the definition: greater than one, and no divisor in range.
 
 ```java
 import java.util.stream.IntStream;
@@ -127,11 +132,11 @@ public class Primes {
 
 ### What a stream is
 
-A stream is a sequence of elements and a pipeline of operations on them. A stream does not store elements and never changes its source. It is a view over data, so a pipeline over a `List` leaves the list untouched. A pipeline has three parts:
+A stream is a sequence of elements plus a pipeline of operations on them. A stream does not store elements, and it never changes its source. It is a view over data, so a pipeline over a `List` leaves the list untouched. A pipeline has three parts:
 
 1. A **source**: a collection, an array, `Stream.of`, `IntStream.range`, or the lines of a file.
-2. Zero or more **intermediate operations** such as `filter`, `map`, `flatMap`, `sorted`, `distinct`, `limit`, `skip`, and `peek`. Each returns a new stream.
-3. One **terminal operation** such as `forEach`, `collect`, `reduce`, `count`, `findFirst`, or `toList`. This runs the pipeline and produces a result or a side effect.
+2. Zero or more **intermediate operations**, such as `filter`, `map`, `flatMap`, `sorted`, `distinct`, `limit`, `skip`, and `peek`. Each one returns a new stream.
+3. One **terminal operation**, such as `forEach`, `collect`, `reduce`, `count`, `findFirst`, or `toList`. It runs the pipeline and produces a result or a side effect.
 
 ```java
 import java.util.List;
@@ -172,14 +177,14 @@ public class StreamSources {
         System.out.println(IntStream.range(1, 5).boxed().toList());          // [1, 2, 3, 4]
         System.out.println(Stream.iterate(0, n -> n + 2).limit(4).toList()); // [0, 2, 4, 6]
         System.out.println(Stream.<String>builder().add("a").add("b").build().toList()); // [a, b]
-        System.out.println(Stream.generate(() -> "element").limit(3).toList());  // [element, element, element]
+        System.out.println(Stream.generate(() -> "element").limit(3).toList());  // three copies
     }
 }
 ```
 
-`Stream.toList()` came in Java 16. `iterate` and `generate` produce infinite sequences, so always put a `limit` or a short-circuiting terminal after them. Otherwise the program runs until memory runs out.
+`Stream.toList()` arrived in Java 16. `iterate` and `generate` produce infinite sequences, so always add a `limit` or a short-circuiting terminal operation after them. Otherwise the program runs until memory runs out.
 
-For files, the stream holds an open file handle, so close it:
+A file stream holds an open file handle, so close it:
 
 ```java
 import java.io.IOException;
@@ -198,13 +203,13 @@ public class CountLines {
 
 ### Intermediate operations
 
-Intermediate operations are lazy. They record a step and return a stream. Nothing runs until a terminal operation is called.
+Intermediate operations are lazy. Each one records a step and returns a stream. Nothing runs until a terminal operation is called.
 
 | Operation | Effect |
 |---|---|
 | `filter(Predicate)` | Keeps elements that match |
 | `map(Function)` | Transforms each element |
-| `flatMap(Function)` | Each element becomes a stream; the results are joined into one stream |
+| `flatMap(Function)` | Each element becomes a stream, and the results are joined into one stream |
 | `distinct()` | Removes duplicates (uses `equals` and `hashCode`) |
 | `sorted()` / `sorted(Comparator)` | Sorts; this is stateful and buffers the whole stream |
 | `limit(n)` / `skip(n)` | Keeps the first `n`, or drops the first `n` |
@@ -230,7 +235,7 @@ public class IntermediateDemo {
 }
 ```
 
-`takeWhile` stops at the first failing element, even if later elements pass. `filter` keeps scanning. That difference is a common interview question.
+`takeWhile` stops at the first element that fails, even if later elements pass. `filter` keeps scanning. That difference is a common interview question.
 
 ### Terminal operations
 
@@ -272,7 +277,7 @@ public class TerminalDemo {
 }
 ```
 
-`reduce` with an identity (`0` above) returns a plain value. Without one it returns an `Optional`, because an empty stream has no result. The identity must be neutral for the operation, so `0` for sum and `1` for product. A non-neutral identity gives wrong answers under parallel execution.
+`reduce` with an identity value (`0` above) returns a plain value. Without one, it returns an `Optional`, because an empty stream has no result. The identity must be neutral for the operation: `0` for sum, `1` for product. A non-neutral identity gives wrong answers under parallel execution.
 
 ### Collectors
 
@@ -282,12 +287,12 @@ public class TerminalDemo {
 |---|---|
 | `toList()`, `toSet()`, `toCollection(TreeSet::new)` | A list, set, or chosen collection |
 | `toMap(keyFn, valueFn[, merge])` | A map; a duplicate key without a merge function throws |
-| `groupingBy(classifier[, mapFactory][, downstream])` | Map from key to group, default downstream is `toList()` |
+| `groupingBy(classifier[, mapFactory][, downstream])` | Map from key to group; the default downstream is `toList()` |
 | `partitioningBy(predicate[, downstream])` | Map with exactly two keys, `true` and `false` |
-| `joining(sep, prefix, suffix)` | One string from `CharSequence` elements |
+| `joining(sep, prefix, suffix)` | One string built from `CharSequence` elements |
 | `counting()`, `summingInt`, `averagingDouble` | Numeric results, used as downstream collectors |
 | `summingLong(fn)`, `averagingLong(fn)` | A `Long` sum (`0L` when empty) or a `Double` average (`0.0` when empty) |
-| `toUnmodifiableList()`, `toUnmodifiableSet()` | A read-only list or set (since Java 10); a set drops duplicates; a `null` element throws `NullPointerException` |
+| `toUnmodifiableList()`, `toUnmodifiableSet()` | A read-only list or set (Java 10); a set drops duplicates; a `null` element throws `NullPointerException` |
 | `summarizingInt(fn)` | `IntSummaryStatistics` with count, sum, min, average, and max |
 | `minBy`, `maxBy` | `Optional` with a comparator |
 
@@ -326,11 +331,11 @@ public class CollectorTour {
 }
 ```
 
-`toMap` throws `IllegalStateException` on a duplicate key unless you pass a merge function. Passing `Integer::sum` as the merge is the usual fix when counting by hand. `groupingBy` returns a `HashMap` unless you pass a factory such as `TreeMap::new`, so use the factory when you print or compare results.
+`toMap` throws `IllegalStateException` on a duplicate key unless you pass a merge function. Passing `Integer::sum` as the merge function is the usual fix when you count by hand. `groupingBy` returns a `HashMap` unless you pass a factory such as `TreeMap::new`, so use the factory when you print or compare results.
 
-`Collectors.toList()` returns an `ArrayList` in practice, but the specification does not promise that type. Since Java 16, `Stream.toList()` returns an unmodifiable list and is usually the right choice when you do not need `Collectors`.
+`Collectors.toList()` returns an `ArrayList` in practice, but the specification does not promise a type. Since Java 16, `Stream.toList()` returns an unmodifiable list and is usually the right choice when you do not need other collectors.
 
-`toUnmodifiableList()` and `toUnmodifiableSet()` give a read-only result from a `collect` call, and they were added before `Stream.toList()`. Use them when a method hands a result to callers who must not change it. The `summingLong` and `averagingLong` collectors do their arithmetic on `long` values, so the sum does not overflow the way an `int` sum can.
+`toUnmodifiableList()` and `toUnmodifiableSet()` give a read-only result from `collect`, and they existed before `Stream.toList()`. Use them when a method hands a result to callers who must not change it. `summingLong` and `averagingLong` do their arithmetic on `long` values, so the sum does not overflow the way an `int` sum can.
 
 ```java
 import java.util.List;
@@ -359,65 +364,102 @@ public class NewCollectors {
 
 ### Parallel streams
 
-`parallelStream()` or `.parallel()` splits the work across the common `ForkJoinPool`. It helps for large, CPU-bound work on splittable sources such as arrays and `ArrayList`. For small inputs, I/O waits, or work that touches shared mutable state, it is slower or wrong.
+`parallelStream()` or `.parallel()` splits the work across the common `ForkJoinPool`. It helps with large, CPU-bound work on sources that split well, such as arrays and `ArrayList`. For small inputs, I/O waits, or work that touches shared mutable state, it is slower or gives wrong results.
 
 | Sequential stream | Parallel stream |
 |---|---|
 | Runs on the calling thread | Splits work across pool threads |
 | Low overhead; good for small inputs | Setup and merge cost; good only for large, CPU-heavy work |
-| Encounter order is preserved | Ordered terminal operations such as `collect` still respect encounter order; `forEach` does not, so use `forEachOrdered` if order matters |
-| Mutating a shared list from `forEach` runs in one thread, so it looks correct | Mutating a shared list from `forEach` is a data race; use `collect` or `reduce` |
+| Encounter order is kept | Ordered terminal operations such as `collect` still respect encounter order; `forEach` does not, so use `forEachOrdered` when order matters |
+| Mutating a shared list from `forEach` runs on one thread, so it looks correct | Mutating a shared list from `forEach` is a data race; use `collect` or `reduce` |
 
 ### Streams compared with loops
 
-A loop is familiar, has very low overhead, and is easy to step through in a debugger. A stream expresses the same work as a pipeline that reads like a description, avoids local mutable variables, and is easy to change by adding or removing a step. Neither is always better. Choose the stream when the pipeline is clearer. Choose a loop for hot paths where measurement shows a difference, or when the logic needs early exits with several side effects.
+A loop is familiar, has very low overhead, and is easy to step through in a debugger. A stream expresses the same work as a pipeline that reads like a description. It avoids local mutable variables, and adding or removing a step is easy. Neither is always better. Choose a stream when the pipeline is clearer. Choose a loop on a hot path where measurement shows a difference, or when the logic needs early exits with several side effects.
 
----
-
-## How it works / Step by step
+### Step by step: what happens inside
 
 | Step | What happens |
 |---|---|
 | 1. Build the pipeline | Each intermediate call records a stage and returns a new stream. Nothing runs. |
 | 2. Call a terminal operation | The stream pulls elements from the source. |
-| 3. Elements flow through the stages | Each element passes through the whole chain before the next one starts (for sequential streams). |
+| 3. Elements flow through the stages | Each element passes the whole chain before the next one starts (sequential streams). |
 | 4. Short-circuit if possible | `findFirst`, `anyMatch`, `limit`, and `takeWhile` can stop early. |
+
+```mermaid
+flowchart LR
+    Src[Source] --> F[filter]
+    F --> M[map]
+    M --> T{Terminal operation}
+    T --> R[Result]
+```
 
 ---
 
-## Common pitfalls
+## Where it is used
 
-- Using `forEach` to build a collection. Use `collect` or `toList()`. Mutating an external list inside a stream is a side effect, and it breaks under parallel execution.
-- Reusing a stream after a terminal operation. It throws `IllegalStateException`. Create a new stream from the source instead.
-- Relying on `peek` for real work. Some pipelines skip it when the count is known, so it is only for debugging.
+- Transforming API responses into view models, for example filtering active users and mapping them to names.
+- Grouping orders by customer or status with `groupingBy` for reports.
+- Reading log files line by line with `Files.lines`, then counting matches.
+- Building lookup maps from lists with `toMap`.
+- Checking business rules with `anyMatch` and `allMatch`.
+
+## Benefits
+
+- Pipelines read as a sequence of named steps, which makes intent clear.
+- Lazy evaluation means work stops early when a short-circuit operation finds its answer.
+- Collectors produce maps, groups, and summaries without manual bookkeeping.
+- Method references and lambdas reduce boilerplate for simple rules.
+
+## Cons and limits
+
+- Stream code can be harder to step through in a debugger than a loop.
+- A stream can be used only once, and it does not store its elements.
+- `sorted` and `distinct` hold all elements in memory before passing them on.
+- Parallel streams add overhead, and they can make results wrong when the work has side effects.
+- Heavy chains with many small lambdas can be harder to read than a plain loop.
+
+### Common pitfalls
+
+- Using `forEach` to build a collection. Use `collect` or `toList()` instead. Mutating an external list inside a stream is a side effect, and it breaks under parallel execution.
+- Reusing a stream after a terminal operation. It throws `IllegalStateException`. Create a new stream from the source.
+- Relying on `peek` for real work. Some pipelines skip it when the count is already known, so use it only for debugging.
 - Using `Collectors.toMap` without a merge function when keys can repeat.
 - Capturing a variable that is not effectively final.
 - Assuming `parallelStream` is always faster. Measure first.
 - Writing `reduce` with a non-neutral identity, or with an operation that is not associative.
-- Forgetting that `sorted()` and `distinct()` hold all elements in memory before passing them on.
+- Forgetting that `sorted()` and `distinct()` hold all elements in memory.
+
+## Best practices
+
+1. Build collections with `collect` or `Stream.toList()`, not with `forEach` side effects.
+2. Put `limit` after `iterate` and `generate`.
+3. Close streams from `Files.lines` and `Files.walk` with try-with-resources.
+4. Use `Comparator.naturalOrder()` or `reverseOrder()` for simple sorting, and provide a merge function to `toMap`.
+5. Use parallel streams only after measuring a clear gain on large, CPU-bound work.
 
 !!! tip "Interview tip"
-    **Q: What is the difference between intermediate and terminal operations?**
-    Intermediate operations are lazy and return a new stream. Terminal operations trigger the pipeline and either produce a result or a side effect. Without a terminal operation, nothing runs.
+    **Q: What is the difference between intermediate and terminal operations?** Intermediate operations are lazy and return a new stream. Terminal operations trigger the pipeline and produce a result or a side effect. Without a terminal operation, nothing runs.
 
-**Q: What is the difference between `map` and `flatMap`?**
-`map` applies a function and gives back one element per input. `flatMap` applies a function that returns a stream for each input and flattens those streams into one.
+    **Q: What is the difference between `map` and `flatMap`?** `map` applies a function and gives back one element per input. `flatMap` applies a function that returns a stream for each input, then flattens those streams into one.
 
-**Q: Is a stream a collection?**
-No. A stream stores no elements and is consumed once. A collection stores its elements and can be traversed many times. Streams are lazy, so they can describe infinite sequences; collections cannot.
+    **Q: Is a stream a collection?** No. A stream stores no elements and is consumed once. A collection stores its elements and can be traversed many times. Streams are lazy, so they can describe infinite sequences, which collections cannot.
 
-**Q: How do you get the second-highest number?**
-Sort in reverse, skip one, then take the first: `nums.stream().sorted(Comparator.reverseOrder()).skip(1).findFirst()`. This works with duplicates only if you call `distinct()` first.
-
----
+    **Q: How do you get the second-highest number?** Sort in reverse, skip one, then take the first: `nums.stream().sorted(Comparator.reverseOrder()).skip(1).findFirst()`. With duplicates, call `distinct()` first.
 
 ## Quick recap
 
 - A lambda is an instance of a functional interface, which has one abstract method.
-- Method references are shorter forms of lambdas that call an existing method.
+- A method reference is a shorter form of a lambda that calls an existing method.
 - A stream pipeline is one source, zero or more intermediate operations, and one terminal operation.
-- Intermediate operations are lazy; short-circuit terminals can stop early.
+- Intermediate operations are lazy. Short-circuit terminal operations can stop early.
 - A stream can be consumed only once, and it never changes its source.
 - Prefer `collect` and `Stream.toList()` over side effects in `forEach`.
+
+## Official documentation
+
+- [java.util.stream package (Java 21 API)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html)
+- [Java Language Specification, Java SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [Java 21 API index](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
 
 **See also:** [Optional and functional interfaces](optional-functional-interfaces.md) - [Java 21 features](java21-features.md) - [Java 9 to 17 features](java9-to-17-features.md) - [Index](index.md)

@@ -1,8 +1,15 @@
 # Circuit Breakers in Spring Boot with Resilience4j
 
-A circuit breaker stops a service from repeatedly calling a dependency that is failing or slow. Once enough calls have failed, the breaker opens and calls fail fast, which protects the caller's threads and gives the dependency room to recover. In Spring Boot the standard library is Resilience4j. Interviewers ask about this to check that you can reason about the states, the fallback, and how retries and timeouts interact.
+!!! note "In simple words"
+    A circuit breaker is like the fuse in a fuse box. When a dependency keeps failing, the breaker trips and calls fail immediately, so your service stops wasting time on a broken neighbour. After a short wait, it tests the water again and resets if the dependency has recovered.
 
-## Core concepts
+## Why it matters
+
+A slow or failing dependency can freeze every caller that waits for it. A circuit breaker stops repeated calls to a failing dependency. Once enough calls fail, the breaker opens and calls fail fast. That protects the caller's threads and gives the dependency room to recover. In Spring Boot the standard library is Resilience4j.
+
+Interviewers ask about this to check that you can reason about the three states, what the fallback must do, and how retries and timeouts interact with the breaker.
+
+## How it works
 
 ### The three states
 
@@ -10,15 +17,24 @@ A circuit breaker is a state machine with three states:
 
 | State | Behaviour | Moves to |
 |---|---|---|
-| `CLOSED` | Calls pass through; failures are counted in a sliding window | `OPEN` when the failure rate or slow-call rate passes its threshold |
-| `OPEN` | Calls are rejected immediately with `CallNotPermittedException` | `HALF_OPEN` after `waitDurationInOpenState` |
-| `HALF_OPEN` | A limited number of trial calls are let through | `CLOSED` if they succeed, `OPEN` if they fail |
+| `CLOSED` | Calls pass through, and failures are counted in a sliding window | `OPEN` when the failure rate or the slow-call rate passes its threshold |
+| `OPEN` | Calls are rejected at once with `CallNotPermittedException` | `HALF_OPEN` after `waitDurationInOpenState` |
+| `HALF_OPEN` | A limited number of trial calls are allowed through | `CLOSED` if the trials succeed, `OPEN` if they fail |
 
-The breaker only decides once the sliding window has enough data. Set `minimumNumberOfCalls` so that one early failure does not open the circuit.
+```mermaid
+stateDiagram-v2
+    [*] --> CLOSED
+    CLOSED --> OPEN: rates pass threshold
+    OPEN --> HALF_OPEN: wait duration elapsed
+    HALF_OPEN --> CLOSED: trial calls succeed
+    HALF_OPEN --> OPEN: trial calls fail
+```
+
+The breaker decides only once its sliding window holds enough data. Set `minimumNumberOfCalls`, so that one early failure cannot open the circuit.
 
 ### Dependencies
 
-For Spring Boot 3 with annotations, use the Resilience4j Boot starter. It provides the annotations, the metrics, and the auto-configuration, and it needs Spring AOP on the classpath.
+For Spring Boot 3 with annotations, add the Resilience4j Boot starter. It provides the annotations, the metrics, and the auto-configuration, and it needs Spring AOP on the classpath.
 
 ```xml
 <dependency>
@@ -31,11 +47,11 @@ For Spring Boot 3 with annotations, use the Resilience4j Boot starter. It provid
 </dependency>
 ```
 
-If you prefer the Spring Cloud abstraction, add `spring-cloud-starter-circuitbreaker-resilience4j` and use `CircuitBreakerFactory` (shown later). Both are Resilience4j underneath. Hystrix is retired and should not be chosen for new code.
+If you prefer the Spring Cloud abstraction, add `spring-cloud-starter-circuitbreaker-resilience4j` and use `CircuitBreakerFactory`, shown later. Both options use Resilience4j underneath. Do not choose Hystrix for new code.
 
 ### Configuration
 
-Each named instance gets its own settings, referenced by the `name` attribute on the annotation.
+Each named instance has its own settings, and the `name` attribute on an annotation refers to it.
 
 ```yaml
 resilience4j:
@@ -63,24 +79,24 @@ resilience4j:
         timeoutDuration: 3s
 ```
 
-The time-limiter key is `timelimiter`, not `timelimit`. Settings you do not list fall back to library defaults, so review them before you rely on a number in an interview answer.
+The time-limiter key is `timelimiter`, not `timelimit`. Any setting you leave out falls back to a library default. Check those defaults before quoting a number in an interview.
 
-### Rolling window: how failures are counted
+### The sliding window: how failures are counted
 
 A breaker does not judge the whole history of a dependency. It keeps a sliding window of recent call outcomes and decides from that window alone. The window type sets what "recent" means:
 
 - `COUNT_BASED` keeps the last N calls. With `slidingWindowSize: 20`, the window always holds the 20 most recent outcomes.
 - `TIME_BASED` keeps the calls from the last N seconds. With `slidingWindowSize: 60`, a call from two minutes ago has no effect. Outcomes are grouped into per-second buckets, so the window moves in steps rather than call by call.
 
-Two thresholds read the window. The `failureRateThreshold` is the percentage of failed calls in the window. The `slowCallRateThreshold` is the percentage of calls slower than `slowCallDurationThreshold`. When either rate reaches its threshold, the breaker opens. Neither rate is evaluated until the window holds at least `minimumNumberOfCalls` outcomes, so the first few calls never open the circuit on their own.
+Two thresholds read the window. The `failureRateThreshold` is the percentage of failed calls in the window. The `slowCallRateThreshold` is the percentage of calls slower than `slowCallDurationThreshold`. When either rate reaches its threshold, the breaker opens. Neither rate is checked until the window holds at least `minimumNumberOfCalls` outcomes. The first few calls therefore never open the circuit on their own.
 
-A worked example with `COUNT_BASED`, `slidingWindowSize: 10`, `minimumNumberOfCalls: 5`, and `failureRateThreshold: 50`:
+A worked example, with `COUNT_BASED`, `slidingWindowSize: 10`, `minimumNumberOfCalls: 5`, and `failureRateThreshold: 50`:
 
-1. Calls 1 and 2 succeed, and calls 3, 4, and 5 fail. The window now holds 5 outcomes, so the rate is checked: 3 of 5 failed is 60 percent, which reaches 50, and the breaker opens.
+1. Calls 1 and 2 succeed, and calls 3, 4, and 5 fail. The window now holds 5 outcomes, so the rate is checked. Three of five failed is 60 percent, which reaches 50, so the breaker opens.
 2. Had the window held only 4 outcomes, the rate would not be checked at all, however many of them failed.
-3. If the breaker had stayed closed, later successes would push the old failures out. After 10 successes, the window holds none of the failures, and the failure rate is 0 percent.
+3. If the breaker had stayed closed, later successes would push the old failures out of the window. After 10 successes, the window holds none of the failures, and the failure rate is 0 percent.
 
-Window size and traffic have to fit together. A `TIME_BASED` window of 60 seconds with `minimumNumberOfCalls: 10` never opens on a route that gets 2 calls a minute, because the minimum is never reached. Choose the window from the real request rate of the dependency, and check it against load tests.
+The window size and the traffic must fit together. A `TIME_BASED` window of 60 seconds with `minimumNumberOfCalls: 10` never opens on a route that gets 2 calls a minute, because the minimum is never reached. Choose the window from the real request rate of the dependency, and check it with load tests.
 
 ```yaml
 resilience4j:
@@ -95,7 +111,7 @@ resilience4j:
 
 ### Annotating a call
 
-The circuit breaker wraps a method that calls the dependency. The fallback method must have the same return type, the same parameters, and an extra trailing `Throwable` (or subclass) parameter.
+The circuit breaker wraps a method that calls the dependency. The fallback method must have the same return type and the same parameters, plus an extra trailing `Throwable` (or subclass) parameter. The example below uses Spring's `RestClient` and was not compiled here.
 
 ```java
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -132,11 +148,11 @@ class PaymentClient {
 }
 ```
 
-The fallback is a decision, not just a default value. Returning `PENDING` tells the caller the charge has not been confirmed, so the order flow must handle it. Do not return "success" to hide a failure.
+The fallback is a decision, not just a default value. Returning `PENDING` tells the caller that the charge is not confirmed, so the order flow must handle that state. Never return "success" to hide a failure.
 
 ### Combining with a timeout
 
-The `@TimeLimiter` annotation cancels a call that runs too long. It only applies to methods that return `CompletableFuture` (or a reactive type), because the time limit has to be enforced from outside the thread that runs the call.
+The `@TimeLimiter` annotation cancels a call that runs too long. It applies only to methods that return a `CompletableFuture` or a reactive type, because the time limit has to be enforced from outside the thread that runs the call.
 
 ```java
 import java.util.concurrent.CompletableFuture;
@@ -152,24 +168,24 @@ class QuoteClient {
     @TimeLimiter(name = "quotes")
     @CircuitBreaker(name = "quotes", fallbackMethod = "staleQuote")
     public CompletableFuture<Quote> fetch(String symbol) {
-        return CompletableFuture.supplyAsync(() -> new Quote(symbol, 10_000));   // stand-in for a remote call
+        return CompletableFuture.supplyAsync(() -> new Quote(symbol, 10_000));   // stands in for a remote call
     }
 
     CompletableFuture<Quote> staleQuote(String symbol, Throwable cause) {
-        return CompletableFuture.completedFuture(new Quote(symbol, -1));         // -1 marks "unknown"
+        return CompletableFuture.completedFuture(new Quote(symbol, -1));         // -1 marks an unknown price
     }
 }
 ```
 
 ### Order of retry and circuit breaker
 
-When both annotations are on one method, Resilience4j applies `Retry` outside the `CircuitBreaker` by default. Each retry attempt therefore passes through the breaker and is recorded by it. The order can be changed in configuration, so state the default if you are asked and say that it is configurable.
+When both annotations sit on one method, Resilience4j applies `Retry` outside the `CircuitBreaker` by default. Each retry attempt therefore passes through the breaker, and the breaker records it. The order can be changed in configuration. If you are asked, state the default and say that it is configurable.
 
-Retry only makes sense for failures that are safe to repeat. Retrying a non-idempotent charge without an idempotency key can charge a customer twice, so pair the retry with an idempotency key or restrict it to connection failures.
+Retry only makes sense for failures that are safe to repeat. Retrying a charge that has no idempotency key can charge a customer twice. Pair the retry with an idempotency key, or limit it to connection failures.
 
 ### Programmatic use
 
-Inject the registry to read a breaker's state and metrics, or to decorate code that is not on a bean method:
+Inject the registry to read a breaker's state and metrics, or to wrap code that is not on a bean method:
 
 ```java
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -204,11 +220,11 @@ class StatusProbe {
 }
 ```
 
-`getMetrics().getFailureRate()` returns a `float` percentage, and `-1` until the breaker has recorded `minimumNumberOfCalls`. Expose state through actuator metrics for dashboards rather than hand-written endpoints.
+`getMetrics().getFailureRate()` returns a `float` percentage. It returns `-1` until the breaker has recorded `minimumNumberOfCalls`. For dashboards, expose the state through Actuator metrics rather than through hand-written endpoints (see [Actuator and API Documentation](../09-spring-boot/actuator-and-api-docs.md)).
 
 ### Spring Cloud CircuitBreaker abstraction
 
-The `CircuitBreakerFactory` API hides the library behind one interface. It suits code that may move between implementations, at the cost of the finer Resilience4j configuration.
+The `CircuitBreakerFactory` API hides the library behind one interface. It suits code that might move between implementations, but it gives you less fine-grained Resilience4j configuration.
 
 ```java
 import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory;
@@ -229,7 +245,7 @@ class InventoryClient {
 
     Stock stock(String sku) {
         return breakers.create("inventory")
-                .run(() -> new Stock(sku, 42),          // stand-in for the remote call
+                .run(() -> new Stock(sku, 42),          // stands in for the remote call
                      throwable -> Stock.unknown(sku));
     }
 }
@@ -239,54 +255,52 @@ class InventoryClient {
 
 Two related Resilience4j annotations isolate or limit calls:
 
-- `@Bulkhead` caps concurrent calls, either with a semaphore or a dedicated thread pool. It stops one slow dependency from consuming every thread.
+- `@Bulkhead` caps concurrent calls, either with a semaphore or with a dedicated thread pool. It stops one slow dependency from using every thread.
 - `@RateLimiter` caps calls per time period. It protects a provider that enforces quotas.
 
-Use both alongside the circuit breaker when one dependency can otherwise drain shared resources.
+Use them alongside the breaker when one dependency could otherwise drain shared resources.
 
 ### Migrating from Hystrix
 
-Hystrix is in maintenance mode and Spring Cloud recommends Resilience4j. The concepts map directly, but the names and configuration differ.
+Hystrix is in maintenance mode, and Spring Cloud recommends Resilience4j. The concepts map across directly, but the names and configuration differ.
 
 | Hystrix | Resilience4j |
 |---|---|
 | `@HystrixCommand(fallbackMethod = ...)` | `@CircuitBreaker(name = ..., fallbackMethod = ...)` |
 | `execution.isolation.thread.timeoutInMilliseconds` | `@TimeLimiter` with `timeoutDuration` |
-| Thread-pool isolation by default | Semaphore isolation by default; thread pools via `@Bulkhead` |
+| Thread-pool isolation by default | Semaphore isolation by default; thread pools through `@Bulkhead` |
 | Properties per command key | YAML per named instance |
 
-Thread-pool isolation costs threads and context switches. Resilience4j's default is lighter, so decide deliberately if a dependency needs the stronger isolation.
+Thread-pool isolation costs threads and context switches. Resilience4j's default is lighter, so choose thread-pool isolation on purpose, only for a dependency that needs the stronger separation.
 
 ## Circuit breaker frameworks compared
 
-Resilience4j is the library to learn for Spring Boot. It is lightweight, it is built from separate modules (circuit breaker, retry, rate limiter, bulkhead, time limiter), and it has annotation and Spring Cloud integration. The other frameworks you may meet in older code or in other teams are worth knowing by name, so you can say why they appear and why you would not start with them today.
+Resilience4j is the library to learn for Spring Boot. It is lightweight, built from separate modules (circuit breaker, retry, rate limiter, bulkhead, time limiter), and it integrates with annotations and Spring Cloud. You may still meet other frameworks in older code or in other teams, so it helps to know them by name and to know why you would not start with them today.
 
 | Framework | Style | When it was used |
 |---|---|---|
-| Netflix Hystrix | Annotation-based, with thread-pool or semaphore isolation | Netflix-style microservices, and many older Spring Cloud services. It is in maintenance mode, and Spring Cloud recommends Resilience4j instead. |
-| Vavr | Functional library; `Try` wraps a call and `recover` supplies the fallback | Teams that wanted fallbacks composed as values, without a breaker library |
-| Failsafe | Plain Java policies that you compose by hand, with no Spring dependency | Standalone services and libraries that had no Spring container |
-| Sentinel | Flow control and circuit breaking with real-time rules and a dashboard | High-traffic systems that already run its control plane and need live tuning |
+| Netflix Hystrix | Annotation-based, with thread-pool or semaphore isolation | Netflix-style microservices and older Spring Cloud services. It is in maintenance mode, and Spring Cloud recommends Resilience4j. |
+| Vavr | Functional library. `Try` wraps a call, and `recover` supplies the fallback | Teams that wanted fallbacks composed as values, without a breaker library |
+| Failsafe | Plain Java policies that you compose yourself, with no Spring dependency | Standalone services and libraries that have no Spring container |
+| Sentinel | Flow control and circuit breaking, with live rules and a dashboard | High-traffic systems that already run its control plane and need live tuning |
 
-Polly is a resilience library for .NET and is not relevant to a Java answer, so leave it out of a Java discussion.
-
-Hystrix's isolation model is the main thing that differs from Resilience4j. Hystrix ran each dependency on its own thread pool by default, which gave strong isolation at the price of threads and context switches. Resilience4j defaults to semaphores and adds a bulkhead when you want a pool. Mention the trade-off if an interviewer asks why the defaults changed.
+Hystrix's isolation model is the main difference from Resilience4j. Hystrix ran each dependency on its own thread pool by default. That gave strong isolation at the cost of threads and context switches. Resilience4j uses semaphores by default and adds a bulkhead when you want a pool. Mention this trade-off if an interviewer asks why the defaults changed.
 
 ### Choosing a framework
 
 | Situation | Recommendation | Reason |
 |---|---|---|
-| A new Spring Boot service | Resilience4j | Spring integration, active maintenance, and modules you pick individually |
+| A new Spring Boot service | Resilience4j | Spring integration, active maintenance, and modules you pick one at a time |
 | Existing Hystrix code | Migrate to Resilience4j | Hystrix is in maintenance mode, and the concepts map across |
-| A standalone Java service without Spring | Resilience4j core, or Failsafe | Both work without a container; choose the one your team already knows |
-| A team that writes functional code | Resilience4j's decorators, applied to a `Supplier`, or Vavr for composition | Resilience4j decorators fit a functional style without a second resilience library |
+| A standalone Java service without Spring | Resilience4j core, or Failsafe | Both work without a container. Choose the one your team knows |
+| A team that writes functional code | Resilience4j decorators on a `Supplier`, or Vavr for composition | Decorators fit a functional style without a second resilience library |
 | An organisation already running Sentinel | Keep Sentinel for the gateway or the flows it governs | Its dashboard and rules are the reason to keep it, so do not add a second breaker to the same call |
 
-Pick one library for each dependency. Two breakers in the same call path, each with its own counters and thresholds, make the behaviour hard to predict and hard to test.
+Pick one library for each dependency. Two breakers on the same call path, each with its own counters and thresholds, make the behaviour hard to predict and hard to test.
 
 ### Combining patterns
 
-Resilience patterns are meant to work together, and the order in which they wrap a call matters. Resilience4j's default decorator order, from outermost to innermost, is:
+Resilience patterns work together, and the order in which they wrap a call matters. Resilience4j's default decorator order, from outermost to innermost, is:
 
 | Order | Pattern | What it does |
 |---|---|---|
@@ -302,40 +316,70 @@ With this order, each retry attempt passes through the breaker, so the breaker c
 A practical rule set:
 
 - Put a timeout on every remote call, so no call waits forever.
-- Retry only idempotent operations, and add backoff so retries do not pile up on a struggling service.
+- Retry only idempotent operations, with backoff, so retries do not pile up on a struggling service.
 - Let the breaker open when retries keep failing, so callers stop waiting on a dependency that is down.
 - Use a bulkhead for a dependency that is slow but usually healthy, so it cannot starve other calls.
 - Make every fallback honest about what it returned, so a failed payment never looks like a success.
 
-## How it works / Step by step
+## Where it is used
 
-1. A call through the annotated bean method is intercepted by an aspect.
-2. If the circuit is `OPEN`, the aspect throws `CallNotPermittedException` (or invokes the fallback) without touching the dependency.
-3. Otherwise the call runs. Its outcome, and its duration, are recorded in the sliding window.
-4. When the failure or slow-call rate passes the threshold, the breaker opens.
-5. After the wait, it moves to `HALF_OPEN` and allows trial calls. Successful trials close it; a failed trial reopens it.
-6. The fallback is invoked whenever the call fails or is rejected, and its result is returned to the caller.
+- **Payment and card providers**, where a broken provider must not stall checkout.
+- **Pricing and quote services**, where a stale answer is better than none, and the fallback says so.
+- **Inventory lookups** on product pages, where a degraded response keeps the page usable.
+- **Third-party APIs with quotas**, where rate limiters and breakers keep the integration within limits.
 
-## Common pitfalls
+## Benefits
 
-- Setting thresholds without `minimumNumberOfCalls`, so a single early error opens the circuit.
-- Writing a fallback that returns a success-looking value and hides a failed payment or write.
-- Using `@TimeLimiter` on a method that returns a plain value, which cannot be enforced that way.
-- Retrying non-idempotent operations, which can duplicate side effects.
-- Sharing one instance name across unrelated dependencies, so one failing service opens the breaker for all of them.
-- Expecting a circuit breaker to fix a slow dependency. It limits damage; the caller still needs timeouts and capacity planning.
-- Forgetting that `CallNotPermittedException` is thrown in the open state, so a catch for `RuntimeException` may hide the difference.
+- **Fast failure**: callers get an answer at once instead of waiting on a dead dependency.
+- **Recovery room**: while open, the breaker sends no traffic, so the dependency can recover.
+- **Clear metrics**: state transitions and failure rates are visible through Actuator.
+- **Composable**: retry, time limiter, rate limiter, and bulkhead can be combined on one method.
+
+## Cons and limits
+
+- **Thresholds need tuning**: wrong window sizes or minimums cause false opens or missed trips.
+- **Fallbacks can hide failures** when they return success-looking values.
+- **Low-traffic routes behave oddly**: the breaker may never reach its minimum call count.
+- **Annotations depend on proxies**: calls from inside the same class skip the aspect.
+- **Multiple breakers on one path** make behaviour hard to predict.
+- **A breaker does not make a slow service fast.** It limits damage. Timeouts and capacity planning are still needed.
+
+## Best practices
+
+- **Set `minimumNumberOfCalls`** so one early error cannot open the circuit.
+- **Return honest fallbacks**, such as `PENDING`, and make the caller handle them.
+- **Give each dependency its own instance name**, so one failing service does not open the breaker for others.
+- **Pair the breaker with a timeout** on the HTTP client, and with `@TimeLimiter` for futures.
+- **Retry only idempotent calls**, and count the retry attempts in your design.
+- **Watch the state metrics** and alert when a breaker stays open.
+- **Test the states**, including open, half-open, and recovery, with a stubbed dependency.
 
 !!! tip "Interview tip"
     **Q: Why would you combine retry, timeout, and circuit breaker?**
-    A timeout stops a single call from hanging. A retry recovers from a brief blip, but only for safe operations. The circuit breaker stops retries from piling onto a dependency that is clearly down, and the fallback keeps the caller responsive. Mention that the breaker counts retry attempts under the default ordering, and that a fallback must be honest about what it returns.
+    A timeout stops a single call from hanging. A retry recovers from a brief blip, but only for safe operations. The circuit breaker stops retries from piling onto a dependency that is clearly down, and the fallback keeps the caller responsive. Mention that under the default ordering the breaker counts retry attempts, and that a fallback must be honest about what it returns.
+
+## Common pitfalls
+
+- Setting thresholds without `minimumNumberOfCalls`, so one early error opens the circuit.
+- Writing a fallback that returns a success-looking value and hides a failed payment or write.
+- Putting `@TimeLimiter` on a method that returns a plain value. It cannot be enforced that way.
+- Retrying non-idempotent operations, which can duplicate side effects.
+- Sharing one instance name across unrelated dependencies, so one failure opens the breaker for all of them.
+- Expecting a breaker to fix a slow dependency. It limits damage, but the caller still needs timeouts and capacity planning.
+- Forgetting that `CallNotPermittedException` is thrown in the open state, so a broad `RuntimeException` catch can hide the difference.
 
 ## Quick recap
 
-- The breaker moves through `CLOSED`, `OPEN`, and `HALF_OPEN`; set `minimumNumberOfCalls` so the decision has enough data.
+- The breaker moves through `CLOSED`, `OPEN`, and `HALF_OPEN`. Set `minimumNumberOfCalls` so the decision has enough data.
 - Use `resilience4j-spring-boot3` for annotations, and configure each named instance in YAML.
-- The fallback has the same signature plus a `Throwable`, and it must not hide a failure.
-- Pair `@CircuitBreaker` with `@TimeLimiter` (for futures) and `@Retry` (for idempotent calls).
-- Hystrix is retired; Resilience4j is the supported choice for Spring Boot.
+- A fallback has the same signature plus a `Throwable`, and it must not hide a failure.
+- Pair `@CircuitBreaker` with `@TimeLimiter` for futures, and with `@Retry` for idempotent calls.
+- Hystrix is in maintenance mode. Resilience4j is the supported choice for Spring Boot.
+
+## Official documentation
+
+- [Resilience4j documentation](https://resilience4j.readme.io/)
+- [Spring Cloud CircuitBreaker reference](https://docs.spring.io/spring-cloud-circuitbreaker/reference/index.html)
+- [Spring Boot reference documentation](https://docs.spring.io/spring-boot/reference/index.html)
 
 **See also:** [Resilience Patterns](resilience-patterns.md) | [Spring Cloud](spring-cloud.md) | [Inter-Service Communication](inter-service-communication.md) | [Async and Threading](../09-spring-boot/spring-async-and-threading.md) | [HTTP Clients and Testing](../09-spring-boot/http-clients-and-testing.md)

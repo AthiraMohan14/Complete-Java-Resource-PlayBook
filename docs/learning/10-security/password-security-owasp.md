@@ -1,18 +1,30 @@
 # Password Security and the OWASP Top 10
 
-Password storage is one of the first things an interviewer checks, because a database leak is the worst case for a login system. The correct answer is an adaptive, salted hash, never plain text and never a fast hash such as MD5 or SHA-256 on its own. The OWASP Top 10 is the standard list of web application risk categories, and interviewers use it to check whether you can name the common risks and their defences.
+!!! note "In simple words"
+    Never store a password as readable text, and never store it with a fast hash. Mix each password with a random salt, run it through a deliberately slow algorithm, and check logins in a way that does not give away which part was wrong.
 
-## Core concepts
+## Why it matters
+
+A database leak is the worst case for any login system. If the stored passwords can be reversed or guessed quickly, every account falls once the data escapes. That is why password storage is one of the first things an interviewer checks. The OWASP Top 10 is the usual list of web risk categories, and it gives you a shared vocabulary for the other defences around passwords.
+
+## How it works
+
+Password handling has two halves: storing a password safely at sign-up, and checking it safely at sign-in. Both halves rely on the same primitives.
+
+1. At registration, the server calls the encoder with the raw password. The encoder creates a random salt and runs the adaptive algorithm.
+2. The encoded string, which holds the algorithm id, the cost settings, the salt, and the hash, is saved. The raw password is discarded.
+3. At sign-in, the server calls `matches` with the raw password and the stored string. The encoder rebuilds the hash from the stored salt and settings, then compares the results in constant time.
+4. If the algorithm or its cost has changed, the server can re-encode the password on the next successful login.
 
 ### Hashing, encryption, and HMAC
 
 These three terms are easy to mix up:
 
-- **Hashing** is one-way. A hash cannot be reversed, which suits password storage (with a salt and an adaptive algorithm) and integrity checks, such as the SHA-256 of a downloaded file.
-- **Encryption** is reversible with a key. Symmetric algorithms such as AES use one key for both directions. Asymmetric algorithms such as RSA and ECC use a public and a private key. Encryption gives confidentiality, but it does not by itself prove who sent a message.
-- **HMAC** is a keyed hash. Only holders of the secret can produce or check the tag, so it shows that a message is intact and came from a party with the key. Webhook providers commonly sign payloads this way.
+- **Hashing** is one-way. A hash cannot be turned back into the input. Password storage uses it with a salt and an adaptive algorithm. Integrity checks use it too, such as the SHA-256 digest of a downloaded file.
+- **Encryption** is reversible when you hold the key. Symmetric algorithms such as AES use one key for both directions. Asymmetric algorithms such as RSA and ECC use a key pair. Encryption protects confidentiality, but by itself it does not prove who sent a message.
+- **HMAC** is a hash keyed with a secret. Only holders of the key can create or check the tag, so the tag shows the message is intact and came from a party that has the key. Webhook providers often sign their payloads this way.
 
-When you check an HMAC, compare the expected and received tags in constant time. An ordinary `equals` returns early at the first mismatch, and the timing can reveal how much of the tag was correct.
+When you check an HMAC, compare the expected tag and the received tag in constant time. A normal `equals` stops at the first mismatch, and the timing can reveal how many leading bytes were correct.
 
 ```java
 import java.nio.charset.StandardCharsets;
@@ -22,6 +34,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 public final class PayloadSigner {
+
+    private PayloadSigner() {
+    }
 
     public static String sign(byte[] secret, String payload) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
@@ -36,30 +51,34 @@ public final class PayloadSigner {
 }
 ```
 
-`HexFormat` needs Java 17 or later. The same constant-time rule applies to API keys, reset tokens, and any other secret you compare.
+`HexFormat` requires Java 17 or later. The same constant-time rule applies to API keys, reset tokens, and any other secret you compare.
 
 ### Why fast hashes are wrong for passwords
 
-A general-purpose hash (SHA-256, for example) is designed to be fast. An attacker with a leaked table and a GPU can test billions of guesses per second. A password hash must be slow and tunable, so that each guess costs real computation. Adaptive algorithms let you raise the cost as hardware improves.
+A general-purpose hash such as SHA-256 is built for speed. An attacker holding a leaked table and a graphics card can test billions of guesses each second. A password hash should be slow and tunable, so every guess costs real computation. Adaptive algorithms let you raise that cost as hardware gets faster.
 
 ### Salts and peppers
 
-A salt is random data unique to each password. It is stored with the hash, and it stops identical passwords from producing identical hashes and defeats precomputed tables. A pepper is a secret value kept outside the database (in a secrets store or configuration). It is applied on top of the hash, so a database leak alone is not enough to attack the passwords. Losing the pepper makes existing hashes unverifiable, so plan key management for it.
+A salt is random data created for each password. It is stored next to the hash. A salt stops two users with the same password from getting the same hash, and it makes precomputed tables useless.
+
+A pepper is a secret value kept outside the database, in a secrets store or in configuration. It is mixed into the hash, so a database leak on its own is not enough to attack the passwords. The cost is key management: if the pepper is lost, no existing hash can be verified, so store it with the same care as any other key.
 
 ### Choosing an algorithm
 
 | Algorithm | Notes |
 |---|---|
-| BCrypt | Widely used and well understood; input is limited to 72 bytes |
-| Argon2 (Argon2id) | Memory-hard; the modern recommendation where available. Spring's encoder needs Bouncy Castle on the classpath |
-| SCrypt | Memory-hard; tunable CPU and memory cost |
-| PBKDF2 | Standard, FIPS-approved; needs a high iteration count |
+| BCrypt | Widely used and well understood. Only the first 72 bytes of input count |
+| Argon2 (Argon2id) | Memory-hard, and the modern recommendation where available. Spring's encoder needs Bouncy Castle on the classpath |
+| SCrypt | Memory-hard, with tunable CPU and memory cost |
+| PBKDF2 | Standard, and approved by FIPS. It needs a high iteration count |
 
-The exact cost parameters should follow current guidance from OWASP's password storage cheat sheet, which is updated over time.
+Take the exact cost settings from the current OWASP password storage guidance, because those values change as hardware improves.
 
 ### Spring Security password encoders
 
-`PasswordEncoder` hides the algorithm. `DelegatingPasswordEncoder` prefixes each stored hash with its algorithm id (for example `{bcrypt}`), so you can migrate algorithms without forcing a password reset for every user.
+`PasswordEncoder` hides the algorithm behind one interface. `DelegatingPasswordEncoder` writes the algorithm id in braces at the start of each stored hash, such as `{bcrypt}`. That lets you move to a new algorithm without resetting every password at once: old hashes keep verifying, and new hashes use the new algorithm.
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.context.annotation.Bean;
@@ -77,10 +96,13 @@ class PasswordConfig {
 }
 ```
 
+*Spring Security example (library code, not compiled here).*
+
 ```java
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class Registration {
+
     private final PasswordEncoder encoder;
 
     Registration(PasswordEncoder encoder) {
@@ -88,46 +110,66 @@ class Registration {
     }
 
     String hashForStorage(String rawPassword) {
-        return encoder.encode(rawPassword);   // stores something like "{bcrypt}$2a$..."
+        return encoder.encode(rawPassword);   // yields something like "{bcrypt}$2a$..."
     }
 
     boolean isCorrect(String rawPassword, String storedHash) {
-        return encoder.matches(rawPassword, storedHash);   // constant-time comparison
+        return encoder.matches(rawPassword, storedHash);   // compares in constant time
     }
 }
 ```
 
-Never compare hashes with `equals`. Always use `matches`, which handles salts and runs in constant time.
+Never compare two hashes with `equals`. Always call `matches`, which handles the salt and the settings for you.
 
 ### Password policy and login protection
 
-Current guidance (NIST SP 800-63B) favours length over composition rules, such as "one symbol and one digit". It also recommends checking new passwords against lists of known-breached passwords, and not forcing periodic changes without a reason. Pair the hashing with:
+NIST SP 800-63B favours length over composition rules, such as "one symbol and one digit". It also recommends checking new passwords against lists of breached passwords. Forced periodic changes are not recommended unless there is a reason, such as a suspected breach. Pair the hashing with these controls:
 
-- Rate limiting on login attempts, per account and per source address.
-- Progressive delays or temporary lockouts, with care to avoid locking out real users as a denial-of-service path.
-- Generic error messages, so the response does not reveal whether an account exists.
-- MFA (see [Authentication](authentication-jwt-oauth.md)).
+- Rate limits on login attempts, both per account and per source address.
+- Short delays or temporary lockouts. Be careful, because a lockout rule can be abused to lock real users out.
+- Generic error messages, so a response never reveals whether an account exists.
+- Multi-factor authentication. See [Authentication](authentication-jwt-oauth.md).
+
+### Login flow with password verification
+
+The sequence below shows what happens at sign-in. The server gives the same answer for an unknown user and for a wrong password, and it never sends the stored hash to the client.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant Store as User store
+    User->>API: Login with username and password
+    API->>Store: Load stored hash
+    Store-->>API: Encoded hash with salt
+    API->>API: Match raw password against hash
+    alt password correct
+        API-->>User: 200 with session or token
+    else wrong password or unknown user
+        API-->>User: 401 with generic message
+    end
+```
 
 ### OWASP Top 10 (2021 edition)
 
-The OWASP Top 10 is a list of the most critical web application risk categories. The 2021 edition is the reference for this section. OWASP updates the list periodically, so check the current version before quoting it in an interview.
+The 2021 edition is the reference used in this section. Check the current edition before you quote it.
 
 | Category | Example defence |
 |---|---|
-| A01 Broken Access Control | Deny by default; check permissions on the server for every request |
-| A02 Cryptographic Failures | Encrypt data in transit and at rest; use current algorithms and key management |
-| A03 Injection (including XSS) | Parameterised queries; context-aware output encoding |
-| A04 Insecure Design | Threat modelling before coding; secure design patterns |
-| A05 Security Misconfiguration | Hardened defaults; remove unused features and endpoints |
-| A06 Vulnerable and Outdated Components | Dependency scanning (software composition analysis); keep libraries updated |
-| A07 Identification and Authentication Failures | MFA; strong password hashing; secure session management |
-| A08 Software and Data Integrity Failures | Avoid unsafe deserialisation; verify artefact signatures |
-| A09 Security Logging and Monitoring Failures | Log security events; alert on them |
-| A10 Server-Side Request Forgery (SSRF) | Allow-list outbound destinations; block internal address ranges |
+| A01 Broken Access Control | Deny by default, and check permissions on the server for every request |
+| A02 Cryptographic Failures | Encrypt data in transit and at rest, use current algorithms, and manage keys |
+| A03 Injection (including XSS) | Parameterised queries and context-aware output encoding |
+| A04 Insecure Design | Threat modelling before coding, and proven secure design patterns |
+| A05 Security Misconfiguration | Hardened defaults, and no unused features or endpoints |
+| A06 Vulnerable and Outdated Components | Dependency scanning and timely upgrades |
+| A07 Identification and Authentication Failures | MFA, strong password hashing, and secure session management |
+| A08 Software and Data Integrity Failures | No unsafe deserialisation, and verified artefact signatures |
+| A09 Security Logging and Monitoring Failures | Log security events and alert on them |
+| A10 Server-Side Request Forgery (SSRF) | Allow-list outbound destinations and block internal address ranges |
 
 ### Injection in Java, in one example
 
-SQL injection happens when user input is concatenated into a query. Parameterised queries prevent it because the driver sends the value separately from the SQL text.
+SQL injection happens when user input is joined into a query string. A parameterised query avoids it, because the driver sends the value separately from the SQL text.
 
 ```java
 import java.sql.Connection;
@@ -136,6 +178,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 
 class CustomerLookup {
+
     String findName(Connection conn, String email) throws SQLException {
         String sql = "SELECT name FROM customer WHERE email = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -148,54 +191,66 @@ class CustomerLookup {
 }
 ```
 
-The same principle applies to JPA and JPQL: use named or positional parameters, never string concatenation.
+JPA and JPQL follow the same rule. Use named or positional parameters, and never concatenate values into the query.
 
-## How it works / Step by step
+## Where it is used
 
-1. At registration, the server calls `encode(rawPassword)`, which generates a random salt and runs the adaptive algorithm.
-2. The encoded string (algorithm id, cost parameters, salt, and hash) is stored. The raw password is discarded.
-3. At login, `matches(raw, stored)` re-derives the hash with the stored salt and parameters and compares the results in constant time.
-4. If the algorithm or cost changed, you can re-hash the password on the user's next successful login.
+- Sign-up and sign-in endpoints for any user-facing system.
+- Password reset flows, which must store reset tokens in a hashed form too.
+- Service accounts and admin logins, which deserve the strictest settings.
+- Webhook receivers, which verify HMAC signatures on each incoming payload.
 
-## Defensive checklist
+## Benefits
 
-Most application defences fall into a few families. Use this table when you review a design.
+- A slow, salted hash makes a leaked table costly to crack.
+- `DelegatingPasswordEncoder` allows the algorithm to change over time without a mass reset.
+- Constant-time checks remove a class of timing leaks.
+- The OWASP table gives reviewers a common checklist for each category.
 
-| Risk | Defence | Where to read more |
-|---|---|---|
-| SQL injection | Parameterised queries; allow-lists for identifiers | [JDBC](../07-jdbc-jpa/jdbc.md) |
-| Cross-site scripting (XSS) | Output encoding for the context; a Content Security Policy | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
-| Cross-site request forgery (CSRF) | Anti-CSRF tokens for cookie-authenticated requests; `SameSite` cookies | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
-| Excess privilege | Least privilege per service and per user; deny by default | [Spring Security Authorisation](spring-security-authorisation.md) |
-| Leaked credentials | A secrets store, injection at runtime, and rotation | [Secrets Management](secrets-management.md) |
-| Eavesdropping | TLS 1.2 or later everywhere; HSTS | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md) |
-| Personal data in logs | Mask or omit personal data and secrets in logs and error responses | [Secrets Management](secrets-management.md) |
-| Vulnerable libraries | Dependency scanning in the build; timely upgrades | [Secure Coding and Supply Chain](secure-coding-and-supply-chain.md) |
-| Timing attacks on secrets | Constant-time comparison (`MessageDigest.isEqual`) | [Hashing, encryption, and HMAC](#hashing-encryption-and-hmac) |
-| Brute force on login | Rate limiting per account and per source; careful lockouts | [Password policy and login protection](#password-policy-and-login-protection) |
+## Cons and limits
 
-Mask personal data as well as credentials in logs. An e-mail address or a card number in a log line is a breach in its own right.
+- Stronger hashing costs more CPU on each login, so the cost setting is a trade-off with latency and server capacity.
+- BCrypt silently ignores bytes after the first 72, which can affect very long passphrases.
+- A pepper that is lost makes every stored hash unverifiable.
+- Password rules do not stop phishing. Multi-factor authentication covers that gap.
+- OWASP is a list of categories, so it does not tell you that a particular feature is safe.
 
-## Common pitfalls
+### Common pitfalls
 
 - Storing passwords with reversible encryption instead of a one-way hash.
-- Using SHA-256 or MD5 for passwords.
-- BCrypt with very long passwords: input beyond 72 bytes is ignored, so a long passphrase may be truncated. Limit the maximum length or pre-hash.
-- Hard-coded salts, or one salt shared across users.
-- Logging passwords, even on failed login attempts.
-- Enumerating accounts through different error messages or timing.
-- Treating the OWASP list as a checklist to finish rather than a set of categories to reason about.
+- Using SHA-256 or MD5 on their own for passwords.
+- Using BCrypt with very long passwords, where input past 72 bytes is ignored. Set a maximum length, or pre-hash the input.
+- Hard-coding a salt, or sharing one salt across users.
+- Logging passwords, including on failed login attempts.
+- Revealing which accounts exist through different error messages or different response times.
+- Treating the OWASP list as a checklist to finish, rather than a set of categories to reason about.
+
+## Best practices
+
+- Hash every password with Argon2id, BCrypt, or SCrypt, using current OWASP cost settings.
+- Use `DelegatingPasswordEncoder` so the algorithm can change later.
+- Verify passwords with `matches`, and never compare hashes directly.
+- Rate-limit logins, return generic errors, and offer multi-factor authentication.
+- Keep passwords and hashes out of logs, metrics, and error messages.
+- Check new passwords against a list of breached passwords.
 
 !!! tip "Interview tip"
     **Q: How would you store user passwords?**
-    Hash each password with an adaptive, memory-hard or cost-tunable algorithm (Argon2id, BCrypt, or SCrypt). Each hash gets a unique random salt, and the algorithm is stored with it so you can migrate later. Use `matches` for verification, add rate limiting on login, and consider a pepper kept outside the database.
+    Pick a slow, salted, cost-tunable function such as Argon2id, BCrypt, or SCrypt. Give every user a random salt, record the algorithm alongside the hash so it can change later, check logins with `matches`, throttle repeated attempts, and optionally keep a pepper outside the database.
 
 ## Quick recap
 
-- Use adaptive, salted password hashes; never fast hashes or reversible encryption.
-- Spring's `DelegatingPasswordEncoder` lets you migrate algorithms over time.
-- Rate-limit logins and return generic errors.
-- Know the OWASP Top 10 categories and one concrete defence for each.
-- Parameterise every query; injection is still a top risk.
+- Passwords belong in slow, salted hashes, never in fast digests or reversible ciphers.
+- A delegating encoder makes it possible to switch algorithms without a mass reset.
+- Throttle login attempts and answer with vague error messages.
+- Each OWASP category should map to at least one control you can name.
+- Parameterised statements remain the main defence against injection.
 
-**See also:** [Spring Security Authorisation](spring-security-authorisation.md) | [Authentication: JWT, OAuth 2.0, and OpenID Connect](authentication-jwt-oauth.md) | [Secrets Management](secrets-management.md)
+## Official documentation
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [Spring Security Reference](https://docs.spring.io/spring-security/reference/index.html)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+- [Java 21 API Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+
+**See also:** [Spring Security Authorisation](spring-security-authorisation.md) | [Authentication: JWT, OAuth 2.0, and OpenID Connect](authentication-jwt-oauth.md) | [Secrets Management](secrets-management.md) | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md)

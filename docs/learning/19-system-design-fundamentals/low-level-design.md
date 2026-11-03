@@ -1,21 +1,38 @@
 # Low-Level Design
 
-Low-level design (LLD) turns a component from the high-level diagram into classes, interfaces, and method signatures. Interviewers use it to test object-oriented thinking: whether you separate responsibilities, choose the right abstraction, apply patterns only where they pay off, and handle errors without leaking chaos into the rest of the system.
+!!! note "In simple words"
+    Low-level design takes one box from a system diagram and decides which classes live inside it, what each class is responsible for, and how they talk to each other.
 
-## Core concepts
+Low-level design (LLD) tests object-oriented thinking. An interviewer wants to see that you separate responsibilities, choose a sensible abstraction, use patterns only where they pay off, and handle errors without letting failures spread through the whole program.
 
-### Object-oriented design
-Start from the nouns and verbs in the requirements. Nouns become classes, and their behaviour becomes methods. Good designs have:
+## Why it matters
 
-- **Clear responsibilities**: each class has one reason to change.
-- **Encapsulated state**: fields are private, and changes go through methods that protect invariants.
-- **Interfaces at the seams**: code depends on abstractions where behaviour may vary.
-- **Composition over inheritance**: combine objects instead of building deep hierarchies, which tie classes together.
+Code written without a plan tends to grow tangled. One class does the pricing, the persistence, and the email, so any change touches everything. A design that starts from the requirements gives each piece one job. Later changes, such as a new payment method or a new notification channel, then add code in one place instead of editing many tested classes.
+
+LLD also protects the team. Clear interfaces let people work in parallel, and small classes are easier to test in isolation.
+
+## How it works
+
+### Start from the requirements
+
+Read the requirements and mark the nouns and verbs. Nouns usually become classes, such as `Order`, `Seat`, or `Account`. Verbs usually become methods, such as `reserve`, `pay`, or `cancel`. Then decide which parts of the system change often, because those are the places that need seams.
+
+A good object design has four traits:
+
+- **Clear responsibilities.** Each class has one reason to change.
+- **Encapsulated state.** Fields are private, and changes go through methods that keep the object valid.
+- **Interfaces at the seams.** Code depends on an abstraction wherever the behaviour may vary.
+- **Composition over inheritance.** Objects are combined, instead of stacking deep class hierarchies that tie code together.
+
+### Protect invariants in the constructor
+
+An invariant is a rule that must always hold for an object. The constructor is the place to enforce it. The `Order` below cannot exist with a negative total, and its fields are final, so the object is safe to share between threads:
 
 ```java
 import java.math.BigDecimal;
 
-public class Order {
+public final class Order {
+
     private final String id;
     private final BigDecimal total;
 
@@ -27,29 +44,56 @@ public class Order {
         this.total = total;
     }
 
-    public String id() { return id; }
-    public BigDecimal total() { return total; }
+    public String id() {
+        return id;
+    }
+
+    public BigDecimal total() {
+        return total;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(new Order("o-1", new BigDecimal("19.90")).total());
+    }
 }
 ```
 
-The constructor protects the invariant, so no `Order` can exist with a negative total. Immutable fields make the object safe to share between threads.
+### Records and sealed types for data
 
-### Class hierarchies and API design
-Use inheritance for a real "is-a" relationship with shared behaviour and a stable contract. Sealed types (Java 17) or records (Java 16) can model a closed set of variants:
+A **record** (Java 16) is a concise, immutable carrier for data. A **sealed** type (Java 17) lists the only classes allowed to implement it. Together they model a closed set of results, and a `switch` over them is checked by the compiler:
 
 ```java
-public sealed interface PaymentResult permits Approved, Declined {}
+public class PaymentResultDemo {
 
-record Approved(String authCode) implements PaymentResult {}
-record Declined(String reason) implements PaymentResult {}
+    public sealed interface PaymentResult permits Approved, Declined {}
+
+    public record Approved(String authCode) implements PaymentResult {}
+
+    public record Declined(String reason) implements PaymentResult {}
+
+    static String describe(PaymentResult result) {
+        return switch (result) {
+            case Approved approved -> "approved with code " + approved.authCode();
+            case Declined declined -> "declined: " + declined.reason();
+        };
+    }
+
+    public static void main(String[] args) {
+        System.out.println(describe(new Approved("A1")));
+        System.out.println(describe(new Declined("insufficient funds")));
+    }
+}
 ```
 
-For API design, make methods narrow and named after intent (`reserve(seat)` rather than `update(state)`), return values rather than mutating arguments, and document preconditions. Public APIs deserve the same care as HTTP APIs: stable names, clear error types, and no leaking of internal types.
+If a new variant is added to `permits`, every `switch` without a case for it fails to compile. That is the safety net you want.
+
+For API design, give methods names that describe intent, such as `reserve(seat)` rather than `update(state)`. Return new values rather than changing arguments in place, and document the preconditions. A public Java API deserves the same care as an HTTP API: stable names, clear error types, and no leaking of internal types.
 
 ### Design patterns
-Patterns are shared solutions to recurring problems. Use them when they remove real duplication or a real variation point, not to decorate code.
 
-**Singleton** ensures one instance. In Java, an enum is the simplest safe form, and it also protects against reflection and serialisation tricks:
+Patterns are named answers to recurring problems. Use one when it removes real duplication or a real variation point. Do not add one just to look thorough.
+
+**Singleton** guarantees one instance. In Java, a single-element enum is the simplest safe form, because the JVM guarantees it is created once and it resists reflection and serialisation tricks:
 
 ```java
 public enum AppClock {
@@ -58,31 +102,36 @@ public enum AppClock {
     public long nowMillis() {
         return System.currentTimeMillis();
     }
+
+    public static void main(String[] args) {
+        System.out.println(AppClock.INSTANCE.nowMillis() > 0);
+    }
 }
 ```
 
-Be cautious: a singleton is a global, which makes testing harder. Inject dependencies where you can.
+A singleton is still a global. Tests cannot easily replace it, so prefer injecting a dependency where you can.
 
-**Factory** centralises object creation so callers do not depend on concrete classes:
+**Factory** moves object creation into one place, so callers depend on an interface rather than on concrete classes:
 
 ```java
-interface Notifier {
-    void send(String message);
-}
+public class NotifierFactoryDemo {
 
-class EmailNotifier implements Notifier {
-    public void send(String message) {
-        System.out.println("email: " + message);
+    interface Notifier {
+        void send(String message);
     }
-}
 
-class SmsNotifier implements Notifier {
-    public void send(String message) {
-        System.out.println("sms: " + message);
+    static final class EmailNotifier implements Notifier {
+        public void send(String message) {
+            System.out.println("email: " + message);
+        }
     }
-}
 
-class NotifierFactory {
+    static final class SmsNotifier implements Notifier {
+        public void send(String message) {
+            System.out.println("sms: " + message);
+        }
+    }
+
     static Notifier create(String channel) {
         return switch (channel) {
             case "email" -> new EmailNotifier();
@@ -90,59 +139,84 @@ class NotifierFactory {
             default -> throw new IllegalArgumentException("unknown channel: " + channel);
         };
     }
+
+    public static void main(String[] args) {
+        create("sms").send("your code is 1234");
+    }
 }
 ```
 
-**Strategy** makes an algorithm replaceable at runtime. A shipping cost calculator can take a strategy per carrier:
+**Strategy** puts each algorithm behind an interface, so one can be swapped without changing its caller. A checkout that charges shipping by different rules is a natural fit:
 
 ```java
 import java.math.BigDecimal;
 
-interface ShippingStrategy {
-    BigDecimal cost(BigDecimal weightKg);
-}
+public class ShippingDemo {
 
-class FlatRate implements ShippingStrategy {
-    public BigDecimal cost(BigDecimal weightKg) {
-        return new BigDecimal("5.00");
-    }
-}
-
-class PerKilogram implements ShippingStrategy {
-    public BigDecimal cost(BigDecimal weightKg) {
-        return weightKg.multiply(new BigDecimal("1.50"));
-    }
-}
-
-class Checkout {
-    private final ShippingStrategy shipping;
-
-    Checkout(ShippingStrategy shipping) {
-        this.shipping = shipping;
+    interface ShippingStrategy {
+        BigDecimal cost(BigDecimal weightKg);
     }
 
-    BigDecimal shippingFor(BigDecimal weightKg) {
-        return shipping.cost(weightKg);
+    static final class FlatRate implements ShippingStrategy {
+        public BigDecimal cost(BigDecimal weightKg) {
+            return new BigDecimal("5.00");
+        }
+    }
+
+    static final class PerKilogram implements ShippingStrategy {
+        public BigDecimal cost(BigDecimal weightKg) {
+            return weightKg.multiply(new BigDecimal("1.50"));
+        }
+    }
+
+    static final class Checkout {
+        private final ShippingStrategy shipping;
+
+        Checkout(ShippingStrategy shipping) {
+            this.shipping = shipping;
+        }
+
+        BigDecimal shippingFor(BigDecimal weightKg) {
+            return shipping.cost(weightKg);
+        }
+    }
+
+    public static void main(String[] args) {
+        Checkout checkout = new Checkout(new PerKilogram());
+        System.out.println(checkout.shippingFor(new BigDecimal("2")));   // prints 3.00
     }
 }
 ```
 
-**Observer** notifies interested parties when state changes. In Java, the `java.util.concurrent.Flow` API and listener interfaces follow this idea. Keep listeners fast or hand work to an executor, so one slow observer does not block the publisher.
+The diagram shows the dependency direction. `Checkout` depends on the interface, and each rule is a separate class that can be tested alone:
+
+```mermaid
+graph LR
+    Checkout --> ShippingStrategy
+    FlatRate --> ShippingStrategy
+    PerKilogram --> ShippingStrategy
+```
+
+**Observer** lets interested parties react when something changes. In Java, listener interfaces and the `java.util.concurrent.Flow` API follow this idea. Keep listeners quick, or hand their work to an executor, so one slow listener does not hold up the publisher.
 
 ### SOLID principles
-- **Single responsibility**: one reason to change per class.
-- **Open/closed**: extend behaviour by adding code, such as a new strategy, rather than editing tested code.
-- **Liskov substitution**: a subtype must honour the contract of its supertype, so callers do not need type checks.
-- **Interface segregation**: prefer small interfaces that clients actually use.
-- **Dependency inversion**: depend on abstractions, and pass implementations in.
 
-The `Checkout` class above follows dependency inversion: it depends on `ShippingStrategy`, not on a particular carrier.
+- **Single responsibility**: a class has one reason to change.
+- **Open/closed**: add behaviour by adding code, such as a new strategy, instead of editing tested code.
+- **Liskov substitution**: a subtype honours the contract of its supertype, so callers need no type checks.
+- **Interface segregation**: prefer small interfaces that each client actually uses.
+- **Dependency inversion**: depend on abstractions and receive implementations from outside.
 
-### Error handling and graceful degradation
-- Use exceptions for exceptional conditions and validation failures that callers cannot continue from. Use checked exceptions for recoverable conditions the caller must handle, and unchecked ones for programming errors.
-- Use `Optional` for "no result" from queries, not for absent required values.
-- Translate low-level errors at the boundary. A repository should not leak a driver-specific exception to the domain.
-- **Graceful degradation** keeps the core function working when a dependency fails: return cached or default data, skip a non-essential feature, or fail fast with a clear message.
+The `Checkout` above follows dependency inversion. It depends on `ShippingStrategy`, not on any one carrier, so a new carrier needs no change to `Checkout`.
+
+### Errors and graceful degradation
+
+- Use exceptions for conditions the caller cannot continue from. Use checked exceptions for recoverable cases the caller must handle, and unchecked exceptions for programming mistakes.
+- Use `Optional` to say that a query may find nothing. Do not use it for a value that is always required.
+- Translate low-level errors at the boundary. A repository should not expose a driver-specific exception to the domain code.
+- **Graceful degradation** keeps the core function working when a dependency fails. Return cached or default data, skip a non-essential feature, or fail fast with a clear message.
+
+The service below returns a generic answer when its recommendation client fails, so the page still renders:
 
 ```java
 public class RecommendationService {
@@ -161,41 +235,89 @@ public class RecommendationService {
         try {
             return client.fetchFor(userId);
         } catch (Exception e) {
-            // Degrade: the page still renders without personalised items
+            // Degrade: the page still renders, just without personal items
             return "popular-items";
         }
+    }
+
+    public static void main(String[] args) {
+        RecommendationService service = new RecommendationService(id -> {
+            throw new Exception("recommendation service is down");
+        });
+        System.out.println(service.recommendationsFor("user-7"));   // prints popular-items
     }
 }
 ```
 
-The fallback here is trivial for illustration. In a real service, log the failure with context, return a precomputed default, and consider a circuit breaker so repeated failures stop adding latency.
+In production, also log the failure with its context, and consider a circuit breaker, so that repeated failures stop adding latency to every request.
 
-## How it works / Step by step
-A method for an LLD interview:
-1. Clarify requirements and the main use cases.
-2. Identify the core entities and their relationships.
+### Step by step method
+
+A method that works in an LLD interview:
+
+1. Clarify the requirements and the main use cases.
+2. Identify the core entities and how they relate.
 3. Define the public interfaces and the main method signatures.
-4. Apply patterns where variation or creation logic is real.
-5. Walk through a main use case end to end, and check the SOLID principles.
-6. Describe error cases and what the user sees in each.
+4. Apply patterns only where variation or creation logic is real.
+5. Walk one main use case from start to finish, and check the SOLID principles.
+6. Describe the error cases and what the user sees in each one.
+
+## Where it is used
+
+- Designing the domain model of a service, such as orders, accounts, or bookings.
+- Structuring a library or SDK, where public interfaces must stay stable.
+- Interview rounds that ask you to design a parking lot, a vending machine, an elevator, or a rate limiter in code.
+- Code reviews, where patterns and responsibilities are checked against the requirements.
+
+## Benefits
+
+- Small classes with clear responsibilities are easier to test and to change.
+- Interfaces at the seams let you swap a carrier, a channel, or a store without rewriting callers.
+- Records and sealed types make invalid states hard to write, and the compiler helps find missing cases.
+- Graceful degradation keeps the user's core task working during partial outages.
+
+## Cons and limits
+
+- Every interface with one implementation adds indirection with no benefit.
+- Patterns can be applied too early. A plain `if` or an enum with a `switch` is often clearer for a small, stable set of variants.
+- A singleton holds global state, and that state makes tests order-dependent.
+- Deep inheritance trees couple classes so tightly that a change in one ripples through many others.
+- Over-abstracted code is harder to debug, because the path from the call to the work is long.
+
+## Best practices
+
+- Derive the classes and methods from the requirements, and write down the main use case before drawing any class.
+- Enforce invariants in constructors, and make value objects immutable.
+- Use interfaces where behaviour varies, and keep them small.
+- Inject dependencies so that tests can replace them.
+- Translate errors at boundaries, and never swallow an exception silently.
+- Make shared mutable objects thread-safe, or avoid sharing them.
 
 ## Common pitfalls
-- Designing every class as an interface, with one implementation each.
+
+- Making every class an interface with exactly one implementation.
 - Using a singleton for state that tests need to replace.
-- Deep inheritance trees for code reuse, which makes changes ripple unpredictably.
-- Mutable domain objects shared across threads without synchronisation.
-- Swallowing exceptions, so failures disappear silently.
-- Choosing a pattern before understanding the variation it is supposed to handle.
+- Building deep inheritance trees for code reuse.
+- Sharing mutable domain objects across threads without synchronisation.
+- Catching an exception and doing nothing, so the failure disappears.
+- Picking a pattern before understanding the variation it is meant to handle.
 
 !!! tip "Interview tip"
     **Q: Why use a Strategy instead of an if-else chain?**
-    A Strategy puts each algorithm behind an interface, so adding a new one means adding a class rather than editing a conditional that every change touches. It follows the open/closed principle and makes each algorithm testable on its own. Mention that a plain enum with a switch is often enough when the set of variants is small and stable.
+    A Strategy puts each algorithm behind an interface. Adding a new algorithm means adding a class, not editing a conditional that every change touches. That follows the open/closed principle and lets each algorithm be tested alone. Mention that an enum with a `switch` is often enough when the set of variants is small and stable, and that choosing a pattern is a judgement, not a rule.
 
 ## Quick recap
-- Model with clear responsibilities, encapsulated state, and narrow, intent-named APIs.
-- Use records and sealed types to model data and closed variant sets.
-- Apply Singleton (as an enum), Factory, Strategy, and Observer where they remove real variation.
-- SOLID guides the seams; dependency inversion is the key one for testability.
-- Translate errors at boundaries and degrade gracefully when dependencies fail.
 
-**See also:** [Core Concepts](core-concepts.md), [High-Level Design](high-level-design.md), [Practice Problems](practice-problems.md), [Java Core](../02a-core-language/index.md)
+- Model with clear responsibilities, private state, and narrow, intent-revealing methods.
+- Use records for data and sealed types for closed sets of variants.
+- Apply a singleton as an enum, a factory, a strategy, or an observer only where they remove real variation.
+- SOLID guides the seams. Dependency inversion matters most for testing.
+- Translate errors at boundaries, and degrade gracefully when a dependency fails.
+
+## Official documentation
+
+- [Java 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Java Language Specification, Java SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [Java.dev](https://dev.java/)
+
+**See also:** [Core Concepts](core-concepts.md) | [High-Level Design](high-level-design.md) | [Practice Problems](practice-problems.md) | [Java Core](../02a-core-language/index.md)

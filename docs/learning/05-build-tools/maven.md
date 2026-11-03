@@ -1,12 +1,17 @@
 # Maven
 
-Maven is a build tool that uses a declarative project file (`pom.xml`) to describe a project's identity, dependencies, and build steps. Interviewers ask about Maven to check that you know how a build moves from source to artefact, how dependencies are resolved, and how to fix a broken build without guessing.
+!!! note "In simple words"
+    Maven reads one file, `pom.xml`, that says what your project is, which libraries it needs, and how to build it. It downloads those libraries and then runs the build steps in a fixed order.
 
-## Core concepts
+## Why it matters
+
+A build tool turns source code into something you can run or ship. Maven does this in a predictable way: one project file, one set of standard steps, and one shared repository for libraries. Interviewers ask about Maven to check three things. Do you know how a build moves from source to artefact? Do you know how library versions are chosen? And can you fix a broken build by reading its output instead of guessing?
+
+## How it works
 
 ### The POM
 
-The Project Object Model (POM) is the `pom.xml` at the root of a project. It declares coordinates (`groupId`, `artifactId`, `version`), packaging, properties, dependencies, and plugins.
+The Project Object Model (POM) is the `pom.xml` file at the root of a project. It records the project's identity, its packaging, its properties, its dependencies, and its plugins.
 
 ```xml
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -35,56 +40,77 @@ The Project Object Model (POM) is the `pom.xml` at the root of a project. It dec
 </project>
 ```
 
-The `groupId:artifactId:version` triple is the coordinate of an artefact. Everything else in Maven depends on it.
+`maven.compiler.release` tells the compiler to target Java 21 and to reject APIs that do not exist in that release.
 
-### Build lifecycle
+### Coordinates
 
-A lifecycle is an ordered sequence of phases. Running a phase runs every phase before it.
+Every artefact has a coordinate made of three parts: `groupId`, `artifactId`, and `version`. A dependency is named by its coordinate, and so is the artefact your project produces. Maven uses the coordinate to decide where a file lives in a repository. For example, `org.junit.jupiter:junit-jupiter:5.10.2` is stored under a folder path built from the group, the artefact name, and the version.
+
+### The build lifecycle
+
+A lifecycle is an ordered list of phases. When you run a phase, Maven also runs every phase that comes before it in the same lifecycle.
 
 | Phase | What it does |
 |---|---|
-| `validate` | Checks the project is correct and all information is available |
-| `compile` | Compiles main source code |
-| `test` | Runs unit tests (Surefire plugin) |
-| `package` | Builds the artefact (JAR, WAR) |
-| `verify` | Runs integration checks on the package |
-| `install` | Copies the artefact into the local repository (`~/.m2`) |
+| `validate` | Checks that the project is complete and readable |
+| `compile` | Compiles the main source code into `target/classes` |
+| `test` | Compiles and runs unit tests with Surefire |
+| `package` | Builds the artefact, such as a JAR or WAR, into `target/` |
+| `verify` | Runs integration checks on the packaged artefact |
+| `install` | Copies the artefact into the local repository at `~/.m2` |
 | `deploy` | Copies the artefact to a remote repository |
 
-`mvn package` runs validate, compile, test, and package. `mvn clean install` also deletes `target/` first, using the separate `clean` lifecycle.
+The `clean` lifecycle is separate. `mvn clean package` runs the clean lifecycle first, which deletes `target/`, and then runs the default lifecycle up to `package`.
+
+```mermaid
+flowchart LR
+    A[validate] --> B[compile] --> C[test] --> D[package] --> E[verify] --> F[install] --> G[deploy]
+```
 
 ### Plugins and goals
 
-Each phase is bound to plugin goals. For example, `maven-compiler-plugin:compile` is bound to `compile`. You can also run a goal directly, such as `mvn dependency:tree`. Plugin configuration goes in `<build><plugins>`.
+A phase does nothing by itself. Plugins attach goals to phases. For example, the compiler plugin binds its `compile` goal to the `compile` phase. You can also run a goal directly from the command line, such as `mvn dependency:tree`, without running a whole phase.
 
 Common plugins:
 
-- **Surefire:** runs unit tests (`*Test.java` by default).
-- **Failsafe:** runs integration tests in the `verify` phase.
-- **Shade:** builds a fat (uber) JAR that bundles dependencies so the application runs with `java -jar`.
-- **Spring Boot Maven plugin:** builds an executable JAR with `spring-boot:repackage`.
+- **Surefire** runs unit tests. It picks up classes named `*Test` by default.
+- **Failsafe** runs integration tests in the `integration-test` and `verify` phases. Use it when tests need a database or a running server.
+- **Shade** builds an uber JAR that contains the application and its dependencies, so `java -jar` works.
+- **Spring Boot Maven plugin** repackages the JAR into an executable form with the `repackage` goal.
+
+Plugin settings go under `<build><plugins>`.
 
 ### Dependencies and scopes
 
-Scopes control when a dependency is on the classpath:
+A scope decides when a dependency is on the classpath. Choose the narrowest scope that works.
 
 | Scope | Compile | Test | Runtime | Typical example |
 |---|---|---|---|---|
-| `compile` (default) | Yes | Yes | Yes | Libraries the code calls |
-| `provided` | Yes | Yes | No | Servlet API supplied by the server |
-| `runtime` | No | Yes | Yes | JDBC driver |
-| `test` | No | Yes | No | JUnit |
+| `compile` (default) | Yes | Yes | Yes | A library the code calls directly |
+| `provided` | Yes | Yes | No | Servlet API that the application server supplies |
+| `runtime` | No | Yes | Yes | A JDBC driver the code never names |
+| `test` | No | Yes | No | JUnit, Mockito |
 
-Transitive dependencies are the dependencies of your dependencies. Maven pulls them in automatically.
+A **transitive dependency** is a dependency of one of your dependencies. Maven downloads it automatically, so the classpath can be much bigger than the list in your POM.
 
-### Dependency mediation and management
+### Nearest wins and version mediation
 
-When two paths bring different versions of the same library, Maven uses **nearest wins**: the version closest to the root of the dependency tree is used. If the distance is equal, the first declaration wins. This is why `dependency:tree` matters.
+Two paths in the tree may bring different versions of the same library. Maven picks one with the **nearest wins** rule. The version reached by the shortest path from your project is used. If two paths have the same length, the first declaration in the POM wins.
 
-Two tools control versions:
+```mermaid
+graph TD
+    A[order-service] --> B[payment-client 2.3.0]
+    A --> C[http-utils 1.0]
+    B --> D[json-lib 2.15]
+    C --> E[json-lib 2.17]
+```
 
-- **`<dependencyManagement>`** sets the version of a dependency for the whole project (and child modules) without adding it to the classpath. Importing the Spring Boot BOM with `<scope>import</scope>` is the standard example.
-- **`<exclusions>`** remove a transitive dependency from one declared dependency.
+In this tree, `json-lib 2.15` is two steps from the project and `json-lib 2.17` is also two steps, so the first declaration wins. If you want a version that does not depend on order, pin it.
+
+Two tools control versions explicitly:
+
+- **`<dependencyManagement>`** sets the version of a dependency for the whole project and its child modules. It does not add the dependency to the classpath. Importing a BOM with `<scope>import</scope>` is the standard way to align many versions at once.
+- **`<exclusions>`** remove one transitive dependency from one declared dependency.
 
 ```xml
 <dependency>
@@ -102,7 +128,7 @@ Two tools control versions:
 
 ### Profiles
 
-Profiles change the build for an environment or condition. Activate one with `-P dev` or an activation rule (for example, a property or the JDK version).
+A profile changes the build for an environment or a condition. You activate it with `-P prod`, or automatically through an activation rule such as a property value or the JDK version.
 
 ```xml
 <profiles>
@@ -115,46 +141,112 @@ Profiles change the build for an environment or condition. Activate one with `-P
 </profiles>
 ```
 
-Keep secrets out of profiles in the POM. Pass them at runtime or from a settings file.
+Keep secrets out of profiles in the POM. The POM is committed to version control. Pass secrets at runtime through environment variables or a user-level settings file.
 
-### Repositories
+### Repositories and settings.xml
 
-Maven resolves artefacts from **Maven Central** by default. A project or company can add repositories in `pom.xml` or, better, in `settings.xml` (under `~/.m2`). Private repositories need credentials in `settings.xml` under `<servers>`, keyed by a repository `id`. Do not commit credentials to the POM.
+Maven looks for artefacts in this order: the local repository at `~/.m2/repository`, then the remote repositories. Maven Central is the default remote. A company can add a private repository such as Nexus or Artifactory.
+
+Repository addresses can go in `pom.xml`, but credentials belong in `~/.m2/settings.xml`. Each credential is stored under `<servers>` with an `<id>`, and the repository in the POM uses the same `<id>`. That way the POM stays free of passwords.
 
 ### Multi-module projects
 
-A parent POM with `<packaging>pom</packaging>` lists child modules with `<modules>`. Children inherit configuration and dependency versions from the parent. Running `mvn install` at the root builds modules in dependency order.
+A parent POM uses `<packaging>pom</packaging>` and lists its children with `<modules>`. Children inherit the parent's properties, plugins, and `<dependencyManagement>` entries. Running `mvn install` from the parent builds the modules in dependency order.
 
-## How it works / Step by step
+```xml
+<project>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>shop-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
 
-When you run `mvn clean package`:
+    <modules>
+        <module>payment-client</module>
+        <module>order-service</module>
+    </modules>
+</project>
+```
 
-1. Maven reads `settings.xml` and the POM hierarchy, merging parents and profiles.
-2. It resolves dependencies, downloading missing artefacts to `~/.m2/repository`.
-3. `clean` deletes `target/`.
-4. Phases run in order; `compile` writes `target/classes`, `test` runs Surefire, and `package` writes the JAR to `target/`.
+### Step by step: what happens during `mvn clean package`
 
-For a broken build, run `mvn -e` for the stack trace, `mvn dependency:tree` to see which version won, and `mvn help:effective-pom` to see the merged POM.
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Maven
+    participant Local as Local repo
+    participant Remote as Remote repo
+    Dev->>Maven: mvn clean package
+    Maven->>Maven: read settings and POM parents
+    Maven->>Local: check for each dependency
+    Local-->>Maven: missing artefact
+    Maven->>Remote: download artefact and its POM
+    Remote-->>Maven: files
+    Maven->>Local: store files in cache
+    Maven->>Maven: compile, test, package
+    Maven-->>Dev: JAR in target folder
+```
 
-## Common pitfalls
+1. Maven reads `settings.xml` and the POM. It merges parent POMs and active profiles into one effective model.
+2. It resolves dependencies. Missing files are downloaded into `~/.m2/repository`.
+3. The `clean` lifecycle deletes `target/`.
+4. The default lifecycle runs `compile`, which writes `target/classes`, then `test`, which runs Surefire, then `package`, which writes the JAR to `target/`.
 
-- Declaring a version in several places, so the versions drift apart. Put shared versions in `<properties>` or a BOM.
-- Relying on transitive dependencies without declaring them. A dependency upgrade can remove them silently.
-- Using `SNAPSHOT` versions in production. Snapshots change; releases should be fixed.
-- Committing credentials or tokens in `pom.xml`.
-- Forgetting that `mvn install` writes to the local repository, so a stale artefact can hide a real problem.
-- Using `<scope>compile</scope>` for test-only libraries, which bloats the production JAR.
+When a build fails, three commands help most:
+
+- `mvn -e` prints the stack trace behind the error message.
+- `mvn dependency:tree` shows which version of each library won.
+- `mvn help:effective-pom` prints the final merged POM, including values from parents and profiles.
+
+## Where it is used
+
+- Backend services, such as an order service or a payment service, that run on Spring Boot or Jakarta EE.
+- Libraries published to Maven Central, where the coordinate is the public name.
+- Enterprise teams that want one standard layout and one set of conventions across many projects.
+- CI pipelines, which run `mvn verify` on each commit to test and package the code.
+
+## Benefits
+
+- **Convention over configuration.** The standard directory layout and phases mean a new developer can build an unfamiliar project with `mvn package`.
+- **Declarative dependencies.** You list what you need; Maven works out the rest, including transitive dependencies.
+- **Reproducible resolution.** A fixed coordinate and a fixed version give the same artefact on any machine that can reach the repository.
+- **Large ecosystem.** Almost every Java library is published to Maven Central with a POM.
+- **Predictable output.** Two engineers running the same phase get the same steps in the same order.
+
+## Cons and limits
+
+- **XML is verbose.** Long POMs are hard to read, and small changes can need several blocks.
+- **Limited customisation.** Non-standard build steps need a custom plugin or an `exec` workaround. Gradle handles custom logic more directly.
+- **Slower on large builds.** Maven has limited incremental build support, so unchanged modules may still run their steps.
+- **Transitive surprises.** Nearest wins can pick a version you did not expect when the tree changes.
+- **No built-in lock file.** Maven cannot record the exact resolved versions by default. You pin versions yourself with a BOM or explicit versions.
+- **Local cache can hide problems.** `~/.m2` may contain a stale artefact from an earlier `install`, so a build can pass on one machine and fail on another.
+
+## Best practices
+
+- Put shared versions in `<properties>` or import a BOM, so every module uses the same version.
+- Declare every library your code uses directly. Do not rely on a transitive dependency that might disappear after an upgrade.
+- Use `test` scope for test-only libraries and `provided` for libraries the server supplies.
+- Use release versions in production. Keep `-SNAPSHOT` for work in progress.
+- Keep credentials in `~/.m2/settings.xml`, never in the POM.
+- Run `mvn dependency:tree` after any dependency change and review the diff.
+- Run integration tests with Failsafe in `verify`, and keep unit tests fast in Surefire.
 
 !!! tip "Interview tip"
     **Q: How does Maven resolve a version conflict?**
-    Maven uses nearest wins. The version reached by the shortest path in the dependency tree is chosen; ties go to the first declaration. To control it explicitly, pin the version in `<dependencyManagement>` (or import a BOM). Use `mvn dependency:tree` to confirm the result.
+    Maven uses nearest wins. The version reached by the shortest path in the dependency tree is chosen; ties go to the first declaration. To control it explicitly, pin the version in `<dependencyManagement>` or import a BOM. Use `mvn dependency:tree` to confirm the result.
 
 ## Quick recap
 
-- The POM declares coordinates, dependencies, and plugins; lifecycles run phases in order.
-- `mvn package` runs `validate` through `package`; `clean` is a separate lifecycle.
-- Scopes control the classpath; `test` and `provided` stay out of the production JAR.
-- Nearest wins resolves conflicts; `dependencyManagement` pins versions.
-- Use Surefire for unit tests, Failsafe for integration tests, and Shade or the Spring Boot plugin for runnable JARs.
+- The POM declares coordinates, dependencies, and plugins. Lifecycles run phases in a fixed order.
+- `mvn package` runs `validate` through `package`. `clean` is a separate lifecycle.
+- Scopes control the classpath. `test` and `provided` stay out of the production JAR.
+- Nearest wins resolves conflicts. `dependencyManagement` and BOMs pin versions.
+- Surefire runs unit tests, Failsafe runs integration tests, and Shade or the Spring Boot plugin builds runnable JARs.
+
+## Official documentation
+
+- [Apache Maven guides](https://maven.apache.org/guides/)
+- [Spring Boot reference documentation](https://docs.spring.io/spring-boot/reference/index.html) (library: covers the Spring Boot BOM and Maven plugin)
 
 **See also:** [Gradle](gradle.md), [Dependency Management](dependency-management.md)

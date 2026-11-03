@@ -1,43 +1,48 @@
 # Annotations and Reflection
 
-Annotations attach metadata to code, and reflection lets a program inspect and use that code at runtime. Together they explain how Spring finds your beans, how JUnit finds your tests, and how JPA maps your entities. Interviewers ask about them to check that you understand the framework magic, not only the syntax.
+!!! note "In simple words"
+    An annotation is a label you attach to code, such as `@Override`. Reflection lets a program read those labels and use the classes and methods it finds, while the program is running.
 
-## Core concepts
+## Why it matters
+
+Frameworks look like magic. Spring finds your beans, JUnit finds your tests, and JPA maps your entities without you writing the wiring. Most of that work is done by annotations read through reflection. Interviewers ask about these two topics to check that you understand the mechanism, not just the syntax, and to test how you would debug a framework that does not find something you expected it to find.
+
+## How it works
 
 ### What an annotation is
 
-An annotation is metadata. By itself it does nothing. It becomes useful when a tool reads it: the compiler, an annotation processor, or code that uses reflection. The annotation has no effect on behaviour unless something acts on it.
+An annotation is metadata. By itself it does nothing. It has an effect only when a tool reads it. The tool can be the compiler, an annotation processor that runs during the build, or code that uses reflection at run time.
 
-There are three forms:
+Annotations come in three forms:
 
-- **Marker**: no elements, such as `@Override` or `@FunctionalInterface`.
-- **Single-element**: one element, which may be named `value`, such as `@SuppressWarnings("unchecked")`.
-- **Full**: several named elements with optional defaults, such as `@Retention(RetentionPolicy.RUNTIME)`.
+- **Marker.** It has no elements, such as `@Override` or `@FunctionalInterface`.
+- **Single-element.** It has one element, often named `value`, such as `@SuppressWarnings("unchecked")`.
+- **Full.** It has several named elements with optional defaults, such as `@Retention(RetentionPolicy.RUNTIME)`.
 
 ### Built-in annotations
 
 | Annotation | Purpose |
 |------------|---------|
-| `@Override` | The compiler checks that the method really overrides a supertype method |
-| `@Deprecated` | Marks an element as discouraged; `forRemoval = true` warns that it will go away |
+| `@Override` | The compiler checks that the method really overrides a method of a supertype |
+| `@Deprecated` | Marks an element as discouraged. `forRemoval = true` warns that it will be removed |
 | `@FunctionalInterface` | The compiler checks that the interface has exactly one abstract method |
 | `@SafeVarargs` | Promises that a varargs method does not misuse its generic array |
-| `@SuppressWarnings` | Suppresses named compiler warnings in the annotated element |
+| `@SuppressWarnings` | Turns off the named compiler warnings for the annotated element |
 
 ### Meta-annotations: annotations on annotations
 
-Four meta-annotations control how your own annotation behaves.
+Four meta-annotations control how your own annotation behaves:
 
-- `@Retention` sets how long the annotation is kept: `SOURCE` (dropped by the compiler), `CLASS` (kept in the class file but not visible at runtime, the default), or `RUNTIME` (visible through reflection).
-- `@Target` limits where the annotation may appear, such as `METHOD`, `FIELD`, or `TYPE`.
-- `@Documented` includes the annotation in generated Javadoc.
-- `@Inherited` lets a subclass inherit a class-level annotation from its superclass. It applies only to classes, not to interfaces or methods.
+- `@Retention` sets how long the annotation is kept. `SOURCE` drops it at compile time. `CLASS` keeps it in the class file but hides it at run time, and it is the default. `RUNTIME` makes it visible through reflection.
+- `@Target` limits where the annotation may be placed, such as `METHOD`, `FIELD`, or `TYPE`.
+- `@Documented` includes the annotation in the generated Javadoc.
+- `@Inherited` lets a subclass inherit a class-level annotation from its superclass. It applies to classes only, not to interfaces or methods.
 
-`@Repeatable` lets the same annotation appear more than once on one element when it is paired with a containing annotation.
+`@Repeatable` lets one element carry the same annotation more than once, with the help of a container annotation.
 
 ### Writing a custom annotation
 
-Declare an annotation with `@interface`. Elements look like methods with optional `default` values.
+Declare an annotation with `@interface`. Each element looks like a method and can have a `default` value.
 
 ```java
 import java.lang.annotation.ElementType;
@@ -64,11 +69,11 @@ class ReportService {
 }
 ```
 
-Without `RUNTIME` retention, the annotation would be invisible to the reader below.
+Without `RUNTIME` retention, the reader in the next section cannot see this annotation.
 
 ### Reading annotations with reflection
 
-Reflection reads annotations through the `AnnotatedElement` interface, which `Class`, `Method`, `Field`, and `Constructor` implement.
+Reflection reads annotations through the `AnnotatedElement` interface. `Class`, `Method`, `Field`, and `Constructor` all implement it.
 
 ```java
 import java.lang.annotation.ElementType;
@@ -102,7 +107,7 @@ public class TimedRunner {
 
         for (Method method : ReportService.class.getDeclaredMethods()) {
             Timed timed = method.getAnnotation(Timed.class);
-            if (timed != null) {
+            if (timed != null && method.getName().equals("run")) {
                 System.out.println("Label: " + timed.label());
                 method.invoke(service);
             }
@@ -111,17 +116,15 @@ public class TimedRunner {
 }
 ```
 
-`getDeclaredMethods()` does not guarantee an order. If the order matters, sort the methods or use an explicit list.
+The order that `getDeclaredMethods()` returns is not guaranteed. If the order matters, sort the methods or keep an explicit list.
 
 ### Annotation processing at compile time
 
-Annotation processors run during compilation. They read annotations on source elements and can generate new source files or report errors. This is how Lombok generates getters and builders, and how MapStruct generates mapper implementations. Compile-time processing needs `SOURCE` or `CLASS` retention, and it does not cost anything at runtime.
-
-Processors are written against `javax.annotation.processing`, which is part of the `java.compiler` module and keeps the `javax` package name even in newer JDKs.
+Annotation processors run during compilation. They read annotations on source elements, and they can generate new source files or report errors. Lombok generates getters and builders this way, and MapStruct generates mapper implementations. Processing happens during the build, so it adds no run-time cost. Processors are written against `javax.annotation.processing`, which lives in the `java.compiler` module and keeps the `javax` package name in current JDKs.
 
 ### What reflection is
 
-Reflection lets code inspect a type (its name, constructors, fields, methods, and annotations) and act on it (create instances, read and write fields, call methods) without knowing those members at compile time. The entry point is `Class`, which you get from `obj.getClass()`, a class literal such as `Foo.class`, or `Class.forName("...")`.
+Reflection lets code inspect a type, including its name, constructors, fields, methods, and annotations. It also lets code act on the type by creating instances, reading and writing fields, and calling methods, all without knowing those members at compile time. The entry point is `Class`. You get one from `obj.getClass()`, from a class literal such as `Foo.class`, or from `Class.forName("...")`.
 
 ```java
 import java.lang.reflect.Constructor;
@@ -129,7 +132,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 class Person {
-
     private String name;
 
     public Person() {
@@ -142,7 +144,6 @@ class Person {
 }
 
 public class ReflectionDemo {
-
     public static void main(String[] args) throws Exception {
         Class<?> type = Person.class;
 
@@ -150,66 +151,113 @@ public class ReflectionDemo {
         Object person = ctor.newInstance();
 
         Field name = type.getDeclaredField("name");
-        name.setAccessible(true);   // Allow access to a private field
+        name.setAccessible(true);       // allow access to a private field
         name.set(person, "Asha");
 
         Method greet = type.getMethod("greet");
-        System.out.println(greet.invoke(person)); // Hello, Asha
+        System.out.println(greet.invoke(person));   // Hello, Asha
     }
 }
 ```
 
-The `setAccessible(true)` call breaks encapsulation on purpose. Frameworks use it to inject values into private fields.
+`setAccessible(true)` deliberately breaks encapsulation. Frameworks use it to inject values into private fields.
 
-### Java modules and strong encapsulation
+### Modules and strong encapsulation
 
-In Java 16 and later, `setAccessible` on a member of a JDK package that is not opened to your code throws `InaccessibleObjectException`. A library that needs deep reflection into a JDK package must be opened with `--add-opens` on the command line. Application code in the unnamed module is less affected, but this is a common surprise when upgrading an older framework to a newer JDK.
+From Java 16, `setAccessible` on a member of a JDK package that is not opened to your code throws `InaccessibleObjectException`. A library that needs deep reflection into a JDK package must be opened with `--add-opens` on the command line. Application code in the unnamed module is less affected, but this is a common surprise when an older framework moves to a newer JDK.
 
 ### Reflection on records
 
-Records expose their components through `Class.getRecordComponents()` (Java 16 and later). This is how serializers such as Jackson read record fields without a setter.
+Records expose their components through `Class.getRecordComponents()`, which is available from Java 16. Serializers such as Jackson use this to read record fields without setters.
 
 ```java
-record Point(int x, int y) { }
+public class RecordReflection {
+    record Point(int x, int y) { }
 
-// Point.class.getRecordComponents() returns two components: x and y
+    public static void main(String[] args) {
+        for (var component : Point.class.getRecordComponents()) {
+            System.out.println(component.getName() + " : " + component.getType());
+        }
+        // prints: x : int, then y : int
+    }
+}
 ```
 
 ### Cost and trade-offs
 
-Reflection is slower than a direct call, and it skips compile-time checks. A wrong method name is a runtime `NoSuchMethodException`, not a compile error. Reflection also makes code harder to read and refactor, because IDEs cannot rename a string-based lookup reliably.
+Reflection is slower than a direct call, and the compiler cannot check it. A wrong method name becomes a `NoSuchMethodException` at run time, not a compile error. Reflection also makes code harder to read and refactor, because an IDE cannot reliably rename a method referred to by a string.
 
-Modern JDKs have reduced much of the cost. `MethodHandle` lookups are a faster alternative for hot paths, but for most application code the difference does not matter, and clarity should win.
+Newer JDKs have reduced much of the cost. `MethodHandle` lookups are a faster choice for hot paths. For most application code the difference does not matter, so clarity should win.
 
-## How it works / Step by step
+### Step by step: how a framework finds a bean
 
-How Spring uses these ideas at startup, in simplified form:
+The steps below show Spring in simplified form. The example is illustrative and was not compiled here.
 
-1. Classpath scanning finds classes annotated with `@Component`, `@Service`, or similar.
-2. For each class, the container reads constructors and fields with reflection, and checks annotations such as `@Autowired`.
-3. The container creates instances and injects collaborators through the reflected members.
-4. Annotations such as `@Transactional` or `@Cacheable` are applied by a proxy wrapped around the bean (see [AOP](../08-spring-core/aop.md)).
+1. Classpath scanning finds classes that carry `@Component`, `@Service`, or a similar annotation.
+2. For each class, the container reads the constructors and fields with reflection, and checks annotations such as `@Autowired`.
+3. The container creates the instances and injects their collaborators through the members it reflected on.
+4. Annotations such as `@Transactional` or `@Cacheable` are applied by a proxy that wraps the bean (see [AOP](../08-spring-core/aop.md)).
 
-Frameworks do most of this work once, at startup. Runtime cost is usually paid during bean creation, not on each request.
+```mermaid
+flowchart TD
+    A[Scan classpath] --> B[Find classes with annotations]
+    B --> C[Read constructors and fields by reflection]
+    C --> D[Create bean instances]
+    D --> E[Inject collaborators]
+    E --> F[Wrap beans with proxies for AOP]
+```
 
-## Common pitfalls
+Frameworks do most of this work once, at start-up. The cost of reflection is usually paid when beans are created, not on each request.
 
-- **Forgetting `RUNTIME` retention.** An annotation with the default `CLASS` retention is not visible to `getAnnotation`, and the lookup returns `null` with no error.
-- **Using `getMethods()` when you need private members.** `getMethods()` returns public methods only, including inherited ones. Use `getDeclaredMethods()` for members declared in the class itself.
-- **Forgetting `@Inherited` expectations.** Subclasses inherit a class annotation only when `@Inherited` is present, and only for classes.
-- **Breaking on private members in new JDKs.** Deep reflection into JDK internals can fail on newer versions. Check for `InaccessibleObjectException`.
-- **String-based lookups in refactored code.** Renaming a method does not update `getMethod("oldName")`. Prefer type-safe approaches where you can.
+## Where it is used
+
+- **Dependency injection frameworks** such as Spring read component and injection annotations to build the object graph.
+- **Test frameworks** such as JUnit find methods marked as tests and run them.
+- **Persistence libraries** such as JPA read mapping annotations to connect entity fields to database columns.
+- **Serialization libraries** such as Jackson read fields and record components to convert objects to and from JSON.
+- **Compile-time tools** such as Lombok and MapStruct read annotations through annotation processors.
+
+## Benefits
+
+- **Less boilerplate.** A single annotation can replace a lot of wiring code.
+- **Declarative intent.** The annotation states what should happen, and the framework does the work.
+- **Flexible tools.** Libraries can work with classes they have never seen before.
+- **Compile-time options.** Annotation processors can generate code with no run-time cost.
+
+## Cons and limits
+
+- **Hidden behaviour.** An annotation can change the program in ways that are hard to see when you read the code.
+- **Slower and less safe.** Reflection bypasses compile-time checks and adds run-time cost.
+- **Fragile names.** String-based lookups break silently when a method is renamed.
+- **Module restrictions.** Deep reflection into JDK internals can fail on newer JDKs without `--add-opens`.
+
+## Best practices
+
+- Use `@Retention(RetentionPolicy.RUNTIME)` on any annotation that code reads at run time. The default `CLASS` retention hides it from `getAnnotation`, and the lookup returns `null` without an error.
+- Use `getDeclaredMethods()` or `getDeclaredFields()` for members declared in the class itself. `getMethods()` returns only public members, including inherited ones.
+- Remember that `@Inherited` works only for class-level annotations, and only when the annotation is marked with it.
+- Catch `InaccessibleObjectException` when reflecting into the JDK, and add `--add-opens` only when you need it.
+- Prefer type-safe code where you can, and keep string-based lookups in one place with tests that protect them.
+- Do not use `setAccessible` to get around a design problem in your own code. Use it only when a framework requires it.
+- Keep annotation processing for generated code that you would otherwise write by hand.
 
 !!! tip "Interview tip"
-    "How does Spring know which class is a bean?" Annotations plus classpath scanning. The container reads the annotations with reflection, creates the objects, and injects dependencies. Mention that `@Retention(RUNTIME)` is what makes the annotation visible to that reading.
+    **Q: How does Spring know which class is a bean?**
+    Annotations plus classpath scanning. The container reads the annotations with reflection, creates the objects, and injects their dependencies. Mention that `@Retention(RUNTIME)` is what makes the annotation visible to that reading.
 
 ## Quick recap
 
-- Annotations are metadata; they do nothing until a tool reads them.
-- `@Retention` controls visibility: `SOURCE`, `CLASS`, or `RUNTIME`.
+- An annotation is metadata. It does nothing until a tool reads it.
+- `@Retention` controls how long an annotation lasts: `SOURCE`, `CLASS`, or `RUNTIME`.
 - `@Target`, `@Documented`, and `@Inherited` shape how an annotation is used.
-- Reflection reads and changes types at runtime through `Class`, `Method`, `Field`, and `Constructor`.
-- `setAccessible` breaks encapsulation; Java modules restrict it.
-- Reflection is flexible but slower and less safe at compile time.
+- Reflection reads and changes types at run time through `Class`, `Method`, `Field`, and `Constructor`.
+- `setAccessible` breaks encapsulation, and Java modules limit where it works.
+- Reflection is flexible, but it is slower and gives fewer compile-time checks.
+
+## Official documentation
+
+- [The Java Language Specification, Java SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Spring Framework reference documentation](https://docs.spring.io/spring-framework/reference/)
 
 **See also:** [Java Tools and Utilities](java-tools-utilities.md), [AOP](../08-spring-core/aop.md), [Generics](../02a-core-language/generics.md), [Structural Patterns](../design-patterns/structural-patterns.md)

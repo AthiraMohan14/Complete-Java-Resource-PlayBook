@@ -1,12 +1,36 @@
 # Validation in Spring Boot
 
-Validation checks that incoming data meets your rules before it reaches business logic. Spring Boot uses Jakarta Bean Validation (the `jakarta.validation` package), which replaced `javax.validation` in Spring Boot 3. Interviewers ask about this to see whether you know where validation happens, what exception each path throws, and why service-layer checks still matter.
+!!! note "In simple words"
+    Validation checks that incoming data follows your rules before your business code runs. You describe the rules with annotations such as `@NotBlank` and `@Min`, and Spring rejects bad input with a `400` response.
 
-## Core concepts
+## Why it matters
+
+Bad input causes bugs, security holes, and corrupt data. Validation at the edge of the application stops most of it early and gives clients a clear answer about what went wrong. Interviewers ask about validation to see whether you know where checks belong, which exception each path throws, and why service-layer checks still matter even when the controller validates.
+
+## How it works
+
+Spring Boot uses Jakarta Bean Validation, which lives in the `jakarta.validation` package. It replaced `javax.validation` in Spring Boot 3. The validator checks a request in a fixed order. The Spring snippets show the shape of the code; they are not compiled as part of this page.
+
+1. The request is bound to the method parameter. For JSON, Jackson converts the body to a record or class.
+2. Because the parameter has `@Valid`, the validator checks every constraint on the object, and on nested objects that are also marked `@Valid`.
+3. If any constraint fails, Spring throws an exception. Request bodies raise `MethodArgumentNotValidException`. Method-level checks raise `ConstraintViolationException`, and in Spring Framework 6.1 and later, controller parameter checks can raise `HandlerMethodValidationException`.
+4. An exception handler, or Spring's default handling, turns the failure into a `400` response. See [Exception Handling](exception-handling.md).
+
+```mermaid
+flowchart TD
+    A[Request arrives] --> B[Bind body to parameter]
+    B --> C{Valid annotation present}
+    C -->|no| F[Constraints ignored]
+    C -->|yes| D[Run constraint checks]
+    D --> E{All constraints pass}
+    E -->|yes| G[Controller runs]
+    E -->|no| H[Exception thrown]
+    H --> I[Handler returns 400]
+```
 
 ### Constraint annotations
 
-Constraints sit on fields, record components, or parameters. Common ones are `@NotNull`, `@NotBlank` (non-null and at least one non-whitespace character), `@NotEmpty`, `@Email`, `@Pattern`, `@Min`, `@Max`, and `@Size`.
+Constraints sit on fields, record components, or parameters. Common ones include `@NotNull`, `@NotBlank` (not null and at least one non-whitespace character), `@NotEmpty`, `@Email`, `@Pattern`, `@Min`, `@Max`, and `@Size`.
 
 ```java
 import jakarta.validation.constraints.*;
@@ -18,11 +42,11 @@ public record CreateUserRequest(
         @Pattern(regexp = "^[A-Z]{2}\\d{4}$") String memberCode) {}
 ```
 
-Annotations on record components are propagated to the canonical constructor's parameters, which is where Bean Validation checks them.
+Constraints placed on record components are copied to the canonical constructor's parameters, which is where Bean Validation checks them.
 
 ### @Valid and @Validated
 
-Add `@Valid` to a `@RequestBody` parameter to validate it when the request is bound. If it fails, Spring throws `MethodArgumentNotValidException`, which turns into a `400` by default.
+Add `@Valid` to a `@RequestBody` parameter to validate it when the request is bound. A failure throws `MethodArgumentNotValidException`, which becomes a `400` by default.
 
 ```java
 import jakarta.validation.Valid;
@@ -35,13 +59,13 @@ class UserController {
 
     @PostMapping
     ResponseEntity<Void> create(@Valid @RequestBody CreateUserRequest request) {
-        // request is already valid here
+        // the request is already valid here
         return ResponseEntity.accepted().build();
     }
 }
 ```
 
-`@Validated` (from Spring) does two jobs. Placed on a class, it enables method validation for constraints on that class's parameters. Placed on a parameter with a group, it selects which validation groups to apply.
+`@Validated` is Spring's annotation, and it does two jobs. On a class, it turns on method validation for constraints on that class's parameters. On a parameter, with a group, it chooses which validation groups apply.
 
 ```java
 import jakarta.validation.constraints.Min;
@@ -60,7 +84,7 @@ class ItemController {
 }
 ```
 
-Validation groups let one DTO have different rules for create and update:
+Validation groups let one DTO follow different rules for create and update:
 
 ```java
 import jakarta.validation.constraints.NotBlank;
@@ -81,7 +105,7 @@ public record ProductRequest(
 
 ### Method validation
 
-`MethodValidationPostProcessor` (auto-configured by Spring Boot when a validator is present) adds validation to any Spring bean annotated with `@Validated`. This is the way to protect service methods, not only controllers. Method validation signals failures with `ConstraintViolationException`. In newer Spring Framework versions (6.1 and later), controller method-parameter constraints can surface as `HandlerMethodValidationException` instead, so check which one your version throws before writing a handler for it.
+`MethodValidationPostProcessor` adds validation to any Spring bean marked with `@Validated`. Spring Boot registers it when a validator is on the classpath. This protects service methods, not only controllers. Method validation raises `ConstraintViolationException`. Spring Framework 6.1 and later can raise `HandlerMethodValidationException` for controller parameters instead, so check which one your version throws before you write a handler for it.
 
 ### Custom constraints
 
@@ -110,45 +134,63 @@ class AllowedCountryValidator implements ConstraintValidator<AllowedCountry, Str
 
     @Override
     public boolean isValid(String value, ConstraintValidatorContext context) {
-        return value == null || ALLOWED.contains(value); // null is handled by @NotNull
+        return value == null || ALLOWED.contains(value);   // null is handled by @NotNull
     }
 }
 ```
 
-Keep validators stateless and free of I/O. A check that needs a database lookup belongs in the service layer.
+Keep validators stateless and free of I/O. A check that needs a database lookup, such as "this email already exists", belongs in the service layer.
 
 ### Messages
 
-Default messages come from `ValidationMessages.properties` and can be localised. Override the message on the annotation for a short, clear default, and keep user-facing wording out of validator code.
+Default messages come from `ValidationMessages.properties` and can be localised. Set a short, clear message on each annotation, and keep user-facing wording out of validator code.
 
-## How it works / Step by step
+## Where it is used
 
-1. A request is bound to the method parameter (for example, JSON to a record via Jackson).
-2. Because `@Valid` is present, the validator checks every constraint on the object graph.
-3. If any constraint fails, Spring throws `MethodArgumentNotValidException` (for request bodies) or `ConstraintViolationException` or `HandlerMethodValidationException` (for method and parameter constraints).
-4. Your exception handler, or Spring's default handling, turns this into a `400` response. See [Exception Handling](exception-handling.md).
+- **Request DTOs:** `@Valid @RequestBody` on every create and update endpoint.
+- **Service methods:** `@Validated` on a service class to protect calls from messages and schedulers.
+- **Domain rules:** custom constraints for codes or formats the team uses often.
+- **Configuration:** `@ConfigurationProperties` classes validated at startup.
 
-Use `@Valid` on nested objects to validate the object graph, because validation does not descend into fields unless you ask it to.
+## Benefits
 
-## Common pitfalls
+- Rules sit next to the data they check, so they are easy to read and review.
+- Failures are consistent and happen before business logic runs.
+- Validation groups let one DTO serve several operations.
+- Custom constraints keep repeated checks in one place.
 
-- Forgetting `@Valid`. Constraints are ignored silently, so bad data gets through.
-- Using `@NotNull` on strings where `@NotBlank` is what you mean. `"   "` passes `@NotNull`.
-- Relying only on controller validation. Services called from other entry points (messages, schedulers) also need checks.
-- Putting database checks (for example, "email already exists") in a constraint. Those belong in the service, with a `409 Conflict` response.
-- Validating the same rules in two places that drift apart.
-- Leaking internal field names or stack traces in the error response.
+## Cons and limits
+
+- Annotations check shape and format, not state. Stock levels, ownership, and uniqueness need the service layer.
+- Constraints on nested objects are ignored unless each nested field is marked `@Valid`.
+- Error messages from the default handling are not always friendly, so an exception handler is usually needed.
+- Two validators that repeat the same rule can drift apart over time.
+
+## Best practices
+
+- Put `@Valid` on every request body. A missing annotation lets bad data through silently.
+- Use `@NotBlank` for strings. `@NotNull` accepts `"   "`.
+- Check business rules in the service, where they can be reached from every entry point. The controller is a convenience layer, not the only gate.
+- Map database conflicts such as duplicate emails to `409 Conflict`, not to a validation error.
+- Do not leak internal field names or stack traces in error responses.
+- Define each rule once, in one DTO or one constraint, and reuse it.
 
 !!! tip "Interview tip"
     **Q: Where would you validate an order request, and why not just in the controller?**
-    Validate shape and format at the boundary with `@Valid` (cheap, no I/O). Validate business rules in the service, because those depend on state (stock, limits, ownership), and the service is reachable from more than one entry point. The controller is a convenience layer, not the only gate.
+    Validate the shape and format at the boundary with `@Valid`. These checks are cheap and need no I/O. Validate business rules in the service, because they depend on state such as stock, limits, and ownership, and the service is reachable from more than one entry point, such as a message listener or a scheduler.
 
 ## Quick recap
 
 - Use Jakarta constraints (`jakarta.validation.*`) on DTO fields and record components.
-- `@Valid` triggers request-body validation; `@Validated` enables method validation and groups.
+- `@Valid` triggers request-body validation. `@Validated` enables method validation and groups.
 - Method validation protects service beans too, and throws its own exception types.
-- Write custom constraints as an annotation plus a stateless validator.
+- Write a custom constraint as an annotation plus a stateless validator.
 - Keep stateful business rules in the service layer.
+
+## Official documentation
+
+- [Spring Framework reference](https://docs.spring.io/spring-framework/reference/)
+- [Spring Boot reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [RFC 9457: Problem Details for HTTP APIs](https://www.rfc-editor.org/rfc/rfc9457)
 
 **See also:** [Building REST APIs](rest-apis.md) | [Exception Handling](exception-handling.md) | [Boot Basics and Configuration](boot-basics-configuration.md)

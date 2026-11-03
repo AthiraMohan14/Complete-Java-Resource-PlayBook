@@ -1,42 +1,73 @@
 # Local Caching with Caffeine and EhCache
 
-A local cache keeps values in the memory of one JVM, so a lookup costs no network round trip. It is the fastest cache you can build, and it is also the most private: each instance has its own copy. This page covers the expiry and eviction rules that govern a local cache, how to configure Caffeine and EhCache, and the staleness trade-offs that interviewers probe. For shared caches, see [Distributed Caching](distributed-caching.md) and [Spring Cache and Redis](spring-cache-and-redis.md).
+!!! note "In simple words"
+    A local cache holds copies of values inside one application process. Reads are the quickest a program can do, but each instance keeps its own copy, so copies can drift apart. Always cap how many entries the cache holds, and give each entry an expiry.
 
-## Core concepts
+## Why it matters
 
-### Why cache in the JVM
-Reading from an in-process map takes nanoseconds to microseconds. Reading from Redis takes a network hop, which is typically around a millisecond. A local cache removes that hop for hot, read-mostly data such as reference tables, configuration, or a product's public details.
+Plenty of data is read constantly and changes rarely, such as reference tables, feature flags, or a product's public details. Asking a database or a network cache for that data on every request wastes time. A local cache skips the network entirely. Interviewers use local caches to test whether you grasp the price of that speed: entries can go stale across instances, memory is capped by the heap, and the contents vanish on restart.
 
-The costs are real. Each instance caches separately, so two instances can return different values after an update. The cache is lost on restart, and it is bounded by the heap, so an unbounded cache is a memory leak.
+## How it works
+
+A local cache is a map in the JVM with two governing rules. An expiry rule removes entries by age or idleness. A size bound evicts entries once the map is full.
+
+1. The first lookup for a key misses, so the loader or method body runs and its result is stored.
+2. Later lookups for that key are answered from the in-process map.
+3. A write path removes the affected entry, or the entry expires through its TTL or TTI.
+4. When the size bound is hit, the eviction policy chooses an entry to drop.
+5. Hit rate and evictions are tracked. A poor hit rate points to a cache that is too small, expires too soon, or uses a weak key.
+
+The flowchart below traces a read through the local map and a write that evicts the key.
+
+```mermaid
+flowchart TD
+    A[Read request] --> B{Key in local map}
+    B -->|hit| C[Return value]
+    B -->|miss| D[Load from database]
+    D --> E[Put in local map]
+    E --> C
+    F[Write request] --> G[Update database]
+    G --> H[Evict local key]
+```
+
+### Why cache inside the JVM
+
+An in-process lookup costs nanoseconds to microseconds. A call to Redis crosses the network, typically around a millisecond. A local cache removes that trip for hot data that is read often and changes rarely.
+
+The costs are real. Every instance caches on its own, so two instances may answer differently after an update. The contents are gone after a restart. The cache lives in the heap, so one without a size limit is a memory leak waiting to happen.
 
 ### Expiry: TTL versus TTI
-Expiry decides when an entry is removed regardless of memory pressure.
+
+Expiry decides when an entry leaves the cache, whatever the memory pressure.
 
 | Policy | Rule | Caffeine | EhCache 3 |
 |---|---|---|---|
-| Time-to-live (TTL) | Expires a fixed time after it was written, whether or not it is read | `expireAfterWrite` | `ttl` in XML, `timeToLiveExpiration` in code |
-| Time-to-idle (TTI) | Expires after a period without any access | `expireAfterAccess` | `tti` in XML, `timeToIdleExpiration` in code |
+| Time-to-live (TTL) | Expires a fixed period after the write, read or not | `expireAfterWrite` | `ttl` in XML, `timeToLiveExpiration` in code |
+| Time-to-idle (TTI) | Expires after a period with no access | `expireAfterAccess` | `tti` in XML, `timeToIdleExpiration` in code |
 
-TTL is the safer default for data that changes on a schedule, because the entry always ends its life within a known window. TTI suits data that is reused heavily, but it has a trap: an entry that is read constantly never expires, so a stale value can live as long as traffic keeps it warm. Use TTI only when staleness is acceptable or when the source is also refreshed.
+TTL is the safer default for data that changes on a schedule, because every entry has a fixed end date. TTI fits data that is hit constantly, but it hides a trap. An entry that is read continuously never expires, so a stale value can survive as long as traffic keeps it warm. Choose TTI only when staleness is tolerable, or when the source is refreshed some other way.
 
 ### Eviction: what goes when the cache is full
-Eviction removes entries to stay within a size bound. Common strategies are:
 
-- **LRU** (least recently used): drop the entry untouched for the longest time.
-- **LFU** (least frequently used): drop the entry with the fewest accesses.
-- **FIFO** (first in, first out): drop the oldest inserted entry, regardless of use.
+Eviction makes room when the cache reaches its size bound. The common strategies are:
 
-Caffeine uses a window-based policy that combines recency and frequency (W-TinyLFU), so you rarely need to choose one. EhCache 3 does not expose a simple switch between these by name in the configuration shown here. Treat the exact eviction order as an implementation detail, and rely on a size bound and an expiry policy as your real controls.
+- **LRU** (least recently used) drops the entry that has gone unread for the longest.
+- **LFU** (least frequently used) drops the entry with the fewest reads.
+- **FIFO** (first in, first out) drops the oldest insertion, whether or not it is still in use.
 
-Always set a maximum size. Without one, the cache grows until the heap runs out.
+Caffeine uses a window-based policy that weighs both recency and frequency (W-TinyLFU), so you rarely need to pick a strategy yourself. EhCache's eviction order is an internal detail, so do not build logic on it. Rely on a size bound and an expiry rule as the controls you actually set.
+
+Always set a maximum size. Without one, the cache keeps growing until the heap is full.
 
 ### Spring cache abstraction with a local provider
-Spring's `@Cacheable`, `@CachePut`, and `@CacheEvict` annotations work the same way over every provider. The provider you pick decides where entries live. Caffeine and EhCache are local, and Redis is shared. The annotation and key rules are covered in [Spring Cache and Redis](spring-cache-and-redis.md).
 
-Enable caching once with `@EnableCaching`, then add the provider dependency. For Caffeine, the starter `spring-boot-starter-cache` plus the `caffeine` library is enough.
+`@Cacheable`, `@CachePut`, and `@CacheEvict` behave identically across providers. The provider decides where entries are kept. Caffeine and EhCache are local, while Redis is shared. The annotation and key rules are described in [Spring Cache and Redis](spring-cache-and-redis.md).
+
+Turn caching on once with `@EnableCaching`, then add a provider. For Caffeine, the `spring-boot-starter-cache` starter plus the `caffeine` library is sufficient.
 
 ### Caffeine in Spring Boot
-Configure Caffeine through a string in `application.yml`, which needs no Java code:
+
+A spec string in `application.yml` configures Caffeine without any Java code:
 
 ```yaml
 spring:
@@ -46,7 +77,9 @@ spring:
       spec: maximumSize=10000,expireAfterWrite=10m
 ```
 
-Or configure it in Java when you need more control:
+For finer control, configure it in Java:
+
+*Spring Boot and Caffeine example (library code, not compiled here).*
 
 ```java
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -71,9 +104,11 @@ public class CacheConfig {
 }
 ```
 
-`recordStats()` turns on hit and miss counters. Without it, there is nothing to report.
+`recordStats()` switches on the hit and miss counters. Without it, nothing is available to report.
 
-A service method that uses the cache:
+A service method that reads through the cache:
+
+*Spring Boot example (library code, not compiled here).*
 
 ```java
 import org.springframework.cache.annotation.Cacheable;
@@ -95,14 +130,16 @@ public class UserService {
 }
 ```
 
-`unless = "#result == null"` stops a missing user from being cached, so a later insert is visible immediately.
+The `unless = "#result == null"` guard keeps a missing user out of the cache, so a user created afterwards shows up immediately.
 
 ### Reporting statistics
-Expose hit rate and size on a schedule or through a metrics endpoint. The native Caffeine cache behind a Spring cache can be read directly:
+
+Publish hit rate and size on a timer, or expose them through a metrics endpoint. The native Caffeine cache behind a Spring cache can be read directly:
+
+*Spring Boot and Caffeine example (library code, not compiled here).*
 
 ```java
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
-import java.util.Map;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -131,10 +168,11 @@ public class CacheStatsReporter {
 }
 ```
 
-This needs `@EnableScheduling` on the application and `recordStats()` in the configuration. A production setup would send these figures to a metrics system rather than print them.
+This requires `@EnableScheduling` on the application and `recordStats()` in the configuration. Production code should send these numbers to a metrics system rather than print them.
 
 ### EhCache 3 configuration
-EhCache is a mature local cache with more tiers and persistence options. Its settings are usually written in an XML file:
+
+EhCache is a long-established local cache with more storage tiers and persistence options. Its settings usually live in an XML file:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -162,9 +200,11 @@ EhCache is a mature local cache with more tiers and persistence options. Its set
 </config>
 ```
 
-Spring Boot reaches EhCache 3 through the JCache (JSR-107) API. Configure `spring.cache.type` to `jcache` and point `spring.cache.jcache.config` at the XML file, with the EhCache and JCache dependencies on the classpath. The exact artifacts depend on the Spring Boot generation, so confirm them in the Boot reference before you rely on them.
+Spring Boot accesses EhCache 3 through the JCache (JSR-107) API. Set `spring.cache.type` to `jcache`, point `spring.cache.jcache.config` at the XML file, and place the EhCache and JCache dependencies on the classpath. Artefact names depend on the Spring Boot generation, so confirm them in the Spring Boot reference first.
 
-The same cache built directly with the EhCache API is useful for code that runs outside Spring:
+A cache can also be built with the EhCache API directly, which suits code running outside Spring:
+
+*EhCache 3 example (library code, not compiled here).*
 
 ```java
 import java.time.Duration;
@@ -195,46 +235,80 @@ public class EhCacheDemo {
 }
 ```
 
-Tiers extend a cache beyond the heap. Heap is fastest and sized in entries. Off-heap uses native memory and is slower. Disk persists to files and is slowest. Values stored off-heap or on disk must be serialisable, and the cost of serialising them should be measured.
+Storage tiers extend a cache past the heap. The heap is fastest and is sized in entries. Off-heap uses native memory and is slower. Disk persists entries to files and is slowest. Values placed off-heap or on disk must be serialisable, and the serialisation cost should be measured.
 
 ## Local versus distributed
+
 | Aspect | Local (Caffeine, EhCache) | Distributed (Redis, Memcached) |
 |---|---|---|
-| Latency | Nanoseconds to microseconds, no network | Typically around a millisecond, with a network hop |
-| Scope | One instance | Shared by all instances |
-| Consistency | Can differ between instances | One copy for all readers |
+| Latency | Nanoseconds to microseconds, no network | Typically around a millisecond, over the network |
+| Scope | One instance | Shared by every instance |
+| Consistency | Instances may differ | One copy for every reader |
 | Capacity | Bounded by the JVM heap | A separate server with its own memory |
-| Survives restart | No | Yes, if the server keeps data |
-| Serialisation | Not needed on heap | Needed for every value |
-| Best for | Hot reads where a short staleness window is fine | Shared state and consistency-sensitive data |
+| Survives restart | No | Yes, if the server keeps its data |
+| Serialisation | Not needed on the heap | Needed for every value |
+| Best for | Hot reads where a short staleness window is fine | Shared state and data that needs consistency |
 
-Many systems combine them: a short-TTL local cache in front of a shared cache. The local TTL bounds how long any one instance can serve an outdated value.
+Teams often layer the two: a short-TTL local cache in front of a shared one. The local TTL caps how long any instance can serve an outdated value.
 
-## How it works / Step by step
-1. The first call with a given key misses, runs the method, and stores the result.
-2. Later calls hit the local map and return without touching the database.
-3. Each write path evicts the entry, or the entry expires by TTL or TTI.
-4. When the size bound is reached, the eviction policy removes an entry to make room.
-5. Hit rate and evictions are monitored; a low hit rate means the cache is too small, too short-lived, or keyed poorly.
+## Where it is used
 
-## Common pitfalls
-- Creating a cache with no maximum size, then running out of heap under load.
-- Using TTI for data that must be fresh, so a busy entry never expires.
-- Assuming all instances agree after an update. Each instance holds its own copy until its expiry or eviction.
-- Caching `null`, so a missing record stays missing after it is created. Use `unless` to prevent this.
-- Calling a `@Cacheable` method from another method in the same class. The call bypasses the Spring proxy, so no caching happens.
-- Using the same key for two caches, or forgetting to name caches separately, so entries overwrite each other.
-- Storing large mutable objects, then modifying them in place. The cached copy changes for every reader.
+- Reference data, such as country codes, exchange rates, or configuration.
+- Popular catalogue or product details that change rarely.
+- Results of pure calculations that depend only on their inputs.
+- A short-lived front layer in front of a shared cache.
+
+## Benefits
+
+- Reads take nanoseconds to microseconds, with no network involved.
+- Nothing external has to be running for the cache to work.
+- Caffeine's policy copes well with mixed access patterns without tuning.
+- Built-in statistics show whether the cache justifies its memory.
+
+## Cons and limits
+
+- Each instance keeps its own copy, so instances can disagree until entries expire.
+- A restart empties the cache, so the first requests after a deploy all miss.
+- Memory is limited to one heap, which makes large caches risky.
+- Without shared invalidation, an update reaches only the instance that handled it.
+- Long-lived entries can hold stale values for a long time.
+
+### Common pitfalls
+
+- Creating a cache without a maximum size, and running out of heap under load.
+- Using TTI for data that has to stay fresh, so a busy entry never expires.
+- Assuming instances agree after an update. Each one keeps its copy until expiry or eviction.
+- Caching `null`, so a missing record stays missing after it is created. Guard with `unless`.
+- Calling a `@Cacheable` method from another method in the same class. The proxy is bypassed, and nothing is cached.
+- Sharing one key space between two caches, or leaving caches unnamed, so entries overwrite each other.
+- Changing large mutable objects in place. Every reader sees the change.
+
+## Best practices
+
+- Set a maximum size on every cache, based on the memory you can spare.
+- Prefer TTL for data that changes on a schedule, and reserve TTI for data where staleness is acceptable.
+- Record statistics, and watch hit rate and evictions.
+- Keep local TTLs short when several instances serve the same data.
+- Treat cached objects as read-only, or copy them before modifying.
+- Write down the maximum staleness each cache may show.
 
 !!! tip "Interview tip"
     **Q: Why not cache everything in memory on each instance?**
-    Local caches are fast but private. Each instance can disagree with the others, the data is lost on restart, and memory is limited to one heap. Use a local cache for hot, read-mostly data where a short staleness window is acceptable. Use a shared cache like Redis when instances must see the same value, and put a short TTL on the local layer either way.
+    The speed of a local map comes with three prices: each instance has its own copy, a restart wipes it, and it can only grow as large as one heap. Keep local caching for hot, slowly changing values that can be a little stale. When every instance must agree, reach for a shared store, and still give the local layer a short TTL.
 
 ## Quick recap
-- A local cache is the fastest tier, but it is private to one instance and bounded by heap.
-- TTL expires entries after a fixed time from write; TTI expires them after a period without access, and can keep stale data alive.
-- Always set a maximum size, and use `unless` to stop nulls being cached.
-- Caffeine is configured with a spec string or a `CaffeineCacheManager`; EhCache 3 uses XML or its own builders, and Spring Boot reaches it through JCache.
-- Monitor hit rate and evictions; a cache you do not measure is a guess.
 
-**See also:** [Distributed Caching](distributed-caching.md), [Spring Cache and Redis](spring-cache-and-redis.md), [Redis Advanced Patterns](redis-advanced-patterns.md), [Performance Optimisation](performance-optimisation.md)
+- Local caches are the quickest tier, yet they stay private to one instance and fit inside one heap.
+- TTL counts from the write; TTI counts from the last read, which lets busy entries stay stale.
+- Set a size ceiling every time, and filter out nulls with `unless`.
+- Caffeine takes a spec string or a `CaffeineCacheManager`; EhCache 3 takes XML or code and joins Spring through JCache.
+- Measure hit rate and evictions, since a cache you never measure is only a hunch.
+
+## Official documentation
+
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+- [Java 21 API Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Java 21 GC Tuning Guide](https://docs.oracle.com/en/java/javase/21/gctuning/)
+
+**See also:** [Distributed Caching](distributed-caching.md) | [Spring Cache and Redis](spring-cache-and-redis.md) | [Redis Advanced Patterns](redis-advanced-patterns.md) | [Performance Optimisation](performance-optimisation.md)

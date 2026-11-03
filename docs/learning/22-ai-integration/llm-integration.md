@@ -1,18 +1,25 @@
 # LLM Integration
 
-A large language model (LLM) generates text from a sequence of input messages. Interviewers ask about LLM integration to see whether you can call a model as a dependency: manage its inputs and outputs, control cost and latency, and handle the ways it fails. The examples here use a provider-neutral interface, because the concepts apply to any hosted or self-hosted model.
+!!! note "In simple words"
+    A large language model (LLM) reads a list of messages and writes text back. Calling one from your application is like calling any slow, costly, sometimes unreliable remote service, so you wrap it, limit it, and check what it returns.
 
-## Core concepts
+Interviewers ask about LLM integration to see whether you can treat a model as a dependency. That means managing what goes in and what comes out, controlling cost and latency, and planning for the ways the call fails. The examples here use a provider-neutral interface, because the same ideas apply to hosted models and to models you run yourself.
 
-### Models as remote dependencies
+## Why it matters
 
-Treat a model like any other external service. It has latency, rate limits, timeouts, costs, outages, and output that varies between calls. Wrap it behind an interface in your code, so the rest of the application does not depend on one vendor's SDK. That also lets you test with a fake model and switch providers without touching business logic.
+A model call looks like a function call, but it behaves differently. It can take seconds, it may be rate limited, it bills per token, and it can return something different on the next call. A feature built as if the model were a local function will hang threads, overrun budgets, and trust text it should check. Designing for those properties from the start prevents most of the incidents that LLM features cause in production.
 
-Providers include hosted APIs from several companies and open-weight models that you can run yourself. Compare them on the criteria your product needs (quality on your tasks, data handling terms, latency, cost, deployment constraints) and measure on your own examples rather than relying on general claims.
+## How it works
+
+### The model as a remote dependency
+
+Wrap the model behind an interface in your own code. The rest of the application then depends on that interface, not on one vendor's SDK. This lets you test with a fake model that is fast and deterministic, and it lets you change providers without touching business logic.
+
+When you compare providers, use the criteria your product needs: quality on your own tasks, how data is handled, latency, cost, and where the model can run. Measure on your own examples, because general benchmark claims rarely match your workload.
 
 ### A provider-neutral interface
 
-A minimal shape for a chat-style call:
+The program below defines chat messages, sampling options, and a `ChatModel` interface. A fake model implements it for tests. It compiles on Java 21 without any network access:
 
 ```java
 import java.util.List;
@@ -29,8 +36,8 @@ public class LlmClientDemo {
         String complete(List<ChatMessage> messages, SamplingOptions options);
     }
 
-    // A fake model for unit tests: no network, deterministic output
-    static class EchoModel implements ChatModel {
+    // Fake model for unit tests: no network, and the same output every time
+    static final class EchoModel implements ChatModel {
         @Override
         public String complete(List<ChatMessage> messages, SamplingOptions options) {
             return "echo: " + messages.get(messages.size() - 1).content();
@@ -48,109 +55,146 @@ public class LlmClientDemo {
 }
 ```
 
-Each real provider implementation would map these records to its own request format. Your business code only sees `ChatModel`.
+A real adapter implements `ChatModel` and maps these records to the provider's request format. The business code only ever sees `ChatModel`.
 
-### Prompt design and roles
+### Prompts and roles
 
-A prompt is the full set of messages sent to the model. Most chat APIs use roles:
+A prompt is the full list of messages sent in one call. Most chat APIs use three roles:
 
-- **System:** standing instructions about behaviour, format, and limits
-- **User:** the request or question from the end user, or your application's input
-- **Assistant:** previous model replies, included when you need multi-turn context
+- **System** messages hold standing instructions about behaviour, output format, and limits.
+- **User** messages carry the request, either from the end user or from your application.
+- **Assistant** messages carry earlier model replies, so the model sees the conversation so far.
 
-Good prompts are specific about the task, the output format, and what to do when information is missing. Keep untrusted content (user text, retrieved documents) clearly delimited, and say that instructions inside it must not be followed. This reduces, but does not eliminate, **prompt injection**, where input text tries to override your instructions.
+Good prompts say what the task is, what the output must look like, and what to do when information is missing. Place untrusted content, such as user text or retrieved documents, inside clearly marked delimiters, and state that instructions inside those delimiters must not be followed. This reduces **prompt injection**, where input text tries to override your instructions, but it does not remove the risk. Treat the model's output as untrusted for that reason.
 
-### Context window and token limits
+### The context window and tokens
 
-A model reads at most a fixed number of **tokens** in one call, its context window. Tokens are sub-word pieces, not words or characters, and the count depends on the model's tokeniser. The window must hold the system prompt, the conversation so far, retrieved context, and the output. If the input is too long, the call fails or you must truncate.
+A model reads a fixed maximum number of **tokens** in one call. That limit is the context window. A token is a sub-word piece of text, not a word or a character, and the count depends on the model's tokeniser. The window must hold the system prompt, the conversation so far, the retrieved context, and the output.
 
-Practical handling:
+Handle long inputs in this order:
 
-1. Count input tokens with the tokeniser for your model, not with a rough character ratio.
-2. Reserve room for the output (`maxOutputTokens`).
-3. Drop or summarise the oldest conversation turns first, and keep the system prompt.
-4. Reject or split requests that cannot fit.
+1. Count input tokens with the tokeniser for your model. A rough character ratio can be far off.
+2. Reserve room for the output, through the maximum output token setting.
+3. Drop or summarise the oldest conversation turns first, and always keep the system prompt.
+4. Reject or split requests that still cannot fit.
 
 ### Cost control
 
-Cost usually scales with input and output tokens. Controls to design in:
+Cost usually grows with input and output tokens. Build these controls in from the start:
 
-- Cap `maxOutputTokens` for each use case
-- Trim context to what the task needs (see [RAG](rag-and-vector-databases.md))
-- Cache responses for repeated identical requests where the answer is stable
-- Send simple tasks to cheaper models and reserve larger models for hard ones
-- Record usage per request and per tenant, so spikes are visible and attributable
-- Set budgets and alerts (see [observability](../20-observability/alerting-health-checks.md))
+- Cap the output tokens for each use case.
+- Trim context to what the task needs. The [RAG page](rag-and-vector-databases.md) covers how to retrieve only relevant passages.
+- Cache answers to repeated identical requests when the answer is stable.
+- Send simple tasks to a smaller model and keep larger models for hard ones.
+- Record usage per request and per tenant, so spikes are visible and can be attributed.
+- Set budgets and alerts. The [metrics page](../20-observability/metrics.md) shows how to publish counters for them.
 
-Do not hard-code prices in your code or docs. They change, and they differ between providers and models.
+Do not hard-code prices in code or in documentation. They change, and they differ between providers and models.
 
 ### Sampling parameters
 
 Sampling parameters control how the model picks each next token:
 
-- **Temperature:** higher values make output more varied; lower values make it more deterministic. Near zero suits extraction and classification. Higher values suit brainstorming.
-- **Top-k:** consider only the k most likely next tokens.
-- **Top-p (nucleus sampling):** consider the smallest set of tokens whose cumulative probability reaches p.
+- **Temperature** sets how varied the output is. Values near zero suit extraction and classification. Higher values suit brainstorming.
+- **Top-k** limits the choice to the k most likely next tokens.
+- **Top-p** (nucleus sampling) limits the choice to the smallest set of tokens whose probabilities add up to p.
 
-Not every provider exposes all of these, and some ignore parameters for certain models. Set them explicitly, test the effect on your data, and do not assume determinism even at temperature zero.
+Not every provider exposes every parameter, and some models ignore certain settings. Set them explicitly, test their effect on your data, and do not assume the output is identical even at temperature zero.
 
-### Streaming responses
+### Streaming
 
-A long answer can take seconds. **Streaming** sends tokens as they are generated, so the user sees output sooner. On the server, that means forwarding chunks over Server-Sent Events or a WebSocket, and handling client disconnects by cancelling the upstream call to save cost. Streaming changes error handling: the HTTP status is already sent when a failure happens mid-stream, so you need an in-band error event.
+A long answer can take several seconds. **Streaming** sends tokens as they are produced, so the user sees progress sooner. On the server, forward the chunks over Server-Sent Events or a WebSocket. When the client disconnects, cancel the upstream call, so you stop paying for tokens nobody will read.
 
-### Function (tool) calling
+Streaming changes error handling. Once the first chunk has been sent, the HTTP status is already fixed, so a failure in the middle must be reported as an error event inside the stream.
 
-Tool calling lets the model request an action from your code. You describe available functions with names, descriptions, and JSON-schema parameters. The model replies with a structured call, such as `lookupOrder` with `{"orderId": "42"}`. Your code validates the arguments, runs the function, and returns the result to the model, which then writes its answer.
+### Tool (function) calling
 
-Important rules:
+Tool calling lets the model ask your code to run an action. You describe each function by name, purpose, and a JSON schema of its parameters. The model replies with a structured request, such as `lookupOrder` with `{"orderId": "42"}`. Your code checks the arguments, runs the function, and returns the result to the model. The model then writes its final answer.
 
-- The model proposes; your code decides. Validate and authorise every call as you would any client request.
-- Limit which tools exist for a given user and request.
-- Cap the number of tool-call rounds to prevent loops.
-- Treat tool output as data, not as instructions.
+Rules for tools:
+
+- The model proposes, and your code decides. Validate and authorise each call as you would any client request.
+- Offer only the tools that the current user and request need.
+- Cap the number of tool rounds, so a loop cannot run forever.
+- Treat tool output as data. It must not be read as new instructions.
 
 ### Structured output
 
-When you need data rather than prose, ask for JSON that matches a schema, then parse and validate it. Models can still produce invalid output, so always validate with a schema or a typed parser and retry or fall back on failure.
+When you need data rather than prose, ask for JSON that matches a schema. Then parse and validate it with a typed parser. Models can still return invalid output, so retry once or fall back to a safe default when validation fails.
 
 ### Failure handling
 
-Expect timeouts, rate-limit responses, content filtering, and malformed output. Design for them:
+Expect timeouts, rate-limit responses, content filter blocks, and malformed output. Design for each one:
 
-- Set explicit timeouts for every call.
-- Retry transient errors with exponential backoff and jitter, within a bounded budget.
-- Validate outputs and treat invalid ones as failures.
-- Provide a fallback (cached answer, simpler path, or a clear "unavailable" message).
-- Log request metadata and outcomes, but do not log full prompts containing personal data unless you have a retention policy for them.
+- Set an explicit timeout on every call.
+- Retry transient errors with exponential backoff and jitter, within a fixed budget.
+- Validate every output, and count an invalid output as a failure.
+- Provide a fallback: a cached answer, a simpler path, or a clear "temporarily unavailable" message.
+- Log request metadata and outcomes. Do not log full prompts that contain personal data unless you have a retention policy for them.
 
-## How it works
+```mermaid
+flowchart TD
+    A[Build prompt with system text and user input] --> B[Count tokens and check window]
+    B --> C{Fits the window}
+    C -- No --> D[Trim or reject]
+    C -- Yes --> E[Call model with timeout]
+    E --> F{Tool requested}
+    F -- Yes --> G[Validate and run tool]
+    G --> E
+    F -- No --> H[Validate output]
+    H --> I[Log usage and return]
+```
 
-1. The application builds a prompt from a system instruction, the user's input, and any retrieved context.
-2. It counts tokens, checks the window, and sets sampling and output limits.
-3. It calls the model through the provider adapter, with a timeout.
-4. If the model requests a tool, the application validates the call, runs it, and sends the result back.
-5. The response is validated, logged with usage data, and returned, or streamed to the client.
+The loop back from the tool step is capped in practice, as the rules above require.
 
-## Common pitfalls
+## Where it is used
 
-- Coupling business code to one vendor's SDK and types
-- Estimating tokens with a character ratio and overflowing the window in production
-- No timeout, so one slow call ties up a thread or connection
-- Trusting model output without validation, especially when it drives actions
-- Letting retrieved documents or user text override system instructions
-- Logging full prompts, which can contain personal data
-- Assuming temperature zero gives identical output every time
+- Chat assistants that answer questions from product or policy text.
+- Summaries, drafts, and classification of support tickets or documents.
+- Extraction of structured fields from free text, such as addresses or invoice lines.
+- Agents that call internal APIs on a user's behalf, with tight limits on what they may do.
+
+## Benefits
+
+- A thin interface keeps the rest of the application stable when providers change.
+- Clear limits on tokens and rounds keep cost and latency predictable.
+- Validation and fallbacks turn a flaky dependency into a feature that degrades gracefully.
+- Usage logs make the cost of each feature visible.
+
+## Cons and limits
+
+- Outputs vary between calls, so tests must check properties of the output rather than exact text.
+- Token limits force trade-offs about how much context a feature can use.
+- A model can be wrong with confidence, and validation only catches format errors, not every factual error.
+- Prompt injection is an open risk, because the model cannot always tell instructions from data.
+- Provider outages and rate limits are outside your control.
+
+## Best practices
+
+- Hide the provider behind your own interface, and test with a fake.
+- Count tokens with the model's own tokeniser, and reserve output space.
+- Set timeouts, bounded retries, and tool-round caps on every call.
+- Validate outputs before they drive any action.
+- Record usage per feature and per tenant, with alerts.
+- Keep an evaluation set of real examples, and rerun it when the prompt or model changes.
+- Do not log personal data from prompts without a retention policy.
 
 !!! tip "Interview tip"
     **Q: How would you keep an LLM feature from running up costs or hanging the service?**
-    A: Put the model behind an interface with timeouts and bounded retries. Cap input and output tokens, trim context, and record usage per tenant with alerts. Validate every output, cap tool-call rounds, and provide a fallback when the call fails. Measure cost and latency on real traffic rather than guessing.
+    Put the model behind an interface with timeouts and bounded retries. Cap input and output tokens, and trim the context. Record usage per tenant, with alerts. Validate every output, cap the tool rounds, and provide a fallback when the call fails. Then measure cost and latency on real traffic, rather than guessing.
 
 ## Quick recap
 
-- Wrap the model behind your own interface so you can test and switch providers
-- Manage the context window explicitly; count tokens with the model's tokeniser
-- Sampling parameters shape output; set them and test their effect
-- Tool calls are proposals: validate, authorise, and bound them
-- Plan for timeouts, retries, invalid output, and cost from the start
+- Wrap the model behind your own interface, so you can test it and change providers.
+- Manage the context window explicitly, and count tokens with the model's tokeniser.
+- Sampling settings shape the output. Set them deliberately and test their effect.
+- Tool calls are proposals. Validate, authorise, and bound them.
+- Plan for timeouts, retries, invalid output, and cost from the start.
 
-**See also:** [RAG and Vector Databases](rag-and-vector-databases.md), [Spring AI and Use Cases](spring-ai-use-cases.md)
+## Official documentation
+
+- [Claude API documentation](https://platform.claude.com/docs/en/home)
+- [Spring AI reference documentation](https://docs.spring.io/spring-ai/reference/index.html)
+- [Spring Framework reference documentation](https://docs.spring.io/spring-framework/reference/)
+
+**See also:** [RAG and Vector Databases](rag-and-vector-databases.md) | [Spring AI and Use Cases](spring-ai-use-cases.md) | [AI and Machine Learning Fundamentals](../ai-machine-learning/llms-and-transformers.md)

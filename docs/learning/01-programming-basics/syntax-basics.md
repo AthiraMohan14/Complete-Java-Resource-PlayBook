@@ -2,10 +2,18 @@
 
 Every Java program follows the same skeleton: a class, a `main` method, and a compile-then-run cycle. This page covers that structure, the naming rules and keywords the compiler enforces, console input with `Scanner`, methods and scope, and type casting. Interviewers use these topics to check that you can read and write basic Java without hesitation.
 
-## Core concepts
+!!! note "In simple words"
+    A Java program lives inside a class and starts at a `main` method. You compile the text into bytecode with `javac`, then run it with `java`.
+
+## Why it matters
+
+Syntax errors are the first thing a compiler reports, and many interview questions are small code puzzles about them. Knowing the naming rules, the reserved words, and how casts behave lets you read unfamiliar code quickly. It also helps you explain why a snippet prints a surprising value.
+
+## How it works
 
 ### Program structure and the main method
-A Java program needs at least one class. The entry point is a `public static void main(String[] args)` method. The JVM calls it with an array of command-line arguments, which are always `String` values.
+
+A Java program needs at least one class. The entry point is a `public static void main(String[] args)` method. The JVM calls it with an array of command-line arguments. Every element of that array is a `String`, so numbers must be parsed.
 
 ```java
 public class Hello {
@@ -15,24 +23,26 @@ public class Hello {
 }
 ```
 
-The file name must match the public class name: this code lives in `Hello.java`.
+The file name must match the public class name, so this code lives in `Hello.java`. A file can hold other non-public classes, but only one public top-level class, and its name decides the file name.
 
 ### Compile, then run
-`javac` compiles source into bytecode. `java` runs the class by name, without the `.class` extension.
+
+`javac` compiles source into bytecode. `java` runs the class by its name, without the `.class` extension.
 
 ```text
 javac Hello.java      # produces Hello.class
 java Hello Ada        # prints: Hello, Ada
 ```
 
-Since Java 11 you can also run a single source file directly, which compiles it in memory first:
+Since Java 11 you can also run a single source file directly. The launcher compiles it in memory first:
 
 ```text
 java Hello.java Ada
 ```
 
 ### Naming conventions and case sensitivity
-Java is case sensitive: `count`, `Count`, and `COUNT` are three different names. The conventions below are not enforced by the compiler, but every Java codebase follows them:
+
+Java is case sensitive. `count`, `Count`, and `COUNT` are three different names. The compiler does not enforce the conventions below, but almost every Java codebase follows them:
 
 | Element | Convention | Example |
 |---|---|---|
@@ -41,10 +51,11 @@ Java is case sensitive: `count`, `Count`, and `COUNT` are three different names.
 | Constant (`static final`) | UPPER_SNAKE_CASE | `MAX_RETRIES` |
 | Package | all lowercase, reverse domain | `com.example.orders` |
 
-Identifiers may contain letters, digits, `_`, and `$`, and they must not start with a digit or be a keyword. Unicode letters are allowed in identifiers.
+Identifiers may contain letters, digits, `_`, and `$`. They must not start with a digit and must not be a keyword. Unicode letters are allowed in identifiers.
 
 ### Keywords
-Java reserves these words, which cannot be used as identifiers:
+
+Java reserves these words. They cannot be used as identifiers:
 
 ```text
 abstract   assert    boolean    break      byte       case
@@ -58,9 +69,10 @@ this       throw     throws     transient  try        void
 volatile   while
 ```
 
-`true`, `false`, and `null` are literals, not keywords, but they are also reserved. The underscore `_` is a reserved keyword since Java 9. `var`, `record`, `sealed`, `permits`, and `yield` are restricted or contextual identifiers: they have special meaning in some positions, and you can still use them as names in others.
+`true`, `false`, and `null` are literals, not keywords, but they are also reserved. The underscore `_` has been a reserved keyword since Java 9. `var`, `record`, `sealed`, `permits`, and `yield` are restricted or contextual identifiers. They have special meaning in some positions, and you can still use them as names in others.
 
 ### Comments
+
 ```java
 // single-line comment
 /* multi-line
@@ -70,18 +82,24 @@ volatile   while
  */
 ```
 
-Java processes Unicode escapes (`\uXXXX`) before it reads the rest of the source. This has a trap: a comment containing `\u000a` ends the comment early, and `"` inside a string literal acts as a quotation mark.
+Java processes Unicode escapes such as `\uXXXX` before it reads the rest of the source. That creates a trap. A comment that contains `\u000a` ends early, because the escape becomes a line break.
 
 ### Unicode
-Java source and `char` values use Unicode. A `char` is a 16-bit UTF-16 code unit, so characters outside the Basic Multilingual Plane (such as many emoji) take two `char` values. Use `String.codePointAt` or `codePoints()` when you need full code points.
+
+Java source and `char` values use Unicode. A `char` is a 16-bit UTF-16 code unit. Characters outside the Basic Multilingual Plane, such as many emoji, need two `char` values. Use `codePointAt` or `codePoints()` when you need full code points.
 
 ```java
-String greeting = "été"; // "été"
-System.out.println(greeting.length());        // 3
-System.out.println(greeting.codePointCount(0, greeting.length())); // 3
+public class Unicode {
+    public static void main(String[] args) {
+        String greeting = "été";
+        System.out.println(greeting.length());                                  // 3
+        System.out.println(greeting.codePointCount(0, greeting.length()));      // 3
+    }
+}
 ```
 
 ### Console input with Scanner
+
 `Scanner` reads tokens and lines from a source such as `System.in`.
 
 ```java
@@ -100,9 +118,9 @@ public class Greeter {
 }
 ```
 
-`nextInt()` reads the number but leaves the line break in the buffer. A following `nextLine()` then returns an empty string. Call `in.nextLine()` once after `nextInt()` to consume it.
+`nextInt()` reads the number but leaves the line break in the buffer. A following `nextLine()` then returns an empty string. Call `in.nextLine()` once after `nextInt()` to consume the leftover line break.
 
-For high-volume input, `BufferedReader` is faster. Use `Integer.parseInt` to convert text, which throws `NumberFormatException` for bad input.
+For high-volume input, `BufferedReader` is faster. Use `Integer.parseInt` to convert text. It throws `NumberFormatException` for bad input.
 
 ```java
 import java.io.BufferedReader;
@@ -127,7 +145,8 @@ public class EchoLines {
 Reader and writer classes are covered in more depth in the file-handling material of the core Java section.
 
 ### Methods and scope
-A method has a return type, a name, and parameters. Parameters are passed by value: a method receives a copy of the primitive value or of the object reference, never the variable itself.
+
+A method has a return type, a name, and parameters. Parameters are passed by value. A method receives a copy of a primitive value, or a copy of an object reference. It never receives the caller's variable itself.
 
 ```java
 public class Scopes {
@@ -147,13 +166,17 @@ public class Scopes {
 }
 ```
 
-A local variable is visible only inside the block where it is declared. Reusing the same name in a sibling block is allowed; reusing it inside a nested block that is still in scope is not.
+A local variable is visible only inside the block where it is declared. Reusing the same name in a sibling block is allowed. Reusing it inside a nested block that is still in scope is not.
+
+Each method call pushes a new frame onto the thread's stack. The frame holds the parameters and locals. When the method returns, the frame is removed, and any locals in it are gone.
 
 ### Problem solving: pseudocode and tracing
-Before coding, write the steps in plain language or pseudocode. Then trace the code by hand with small inputs: write each variable's value after every line. Most logic errors show up in the trace, and the same method works for debugging with a debugger's step-through.
+
+Before coding, write the steps in plain language or pseudocode. Then trace the code by hand with small inputs. Write each variable's value after every line. Most logic errors show up in the trace. A debugger's step-through works the same way, so tracing by hand trains the habit you need when debugging.
 
 ### Date and time basics
-Modern date and time code uses `java.time`, not `java.util.Date`. A quick example:
+
+Modern date and time code uses `java.time`, not `java.util.Date`.
 
 ```java
 import java.time.LocalDate;
@@ -166,35 +189,70 @@ public class DateBasics {
 }
 ```
 
-The fuller date and time API is outside this section's scope; the roadmap places it in the core Java and modern Java sections.
+The fuller date and time API is outside this section's scope. The roadmap places it in the core Java and modern Java sections.
 
 ### Type casting
-Casting converts a value from one type to another. Two kinds exist.
+
+Casting converts a value from one type to another. There are two kinds.
 
 - **Widening (implicit, safe):** `byte` to `short` to `int` to `long` to `float` to `double`. No data is lost in the normal case. `long` to `float` can lose precision for very large values.
 - **Narrowing (explicit, may lose data):** you write the target type in parentheses. The value is truncated or wrapped.
 
 ```java
-int big = 300;
-byte small = (byte) big;        // 300 wraps to 44
-double d = 3.99;
-int truncated = (int) d;        // 3: truncates toward zero, does not round
-int code = 'A';                 // char widens to int automatically: 65
-char letter = (char) 66;        // 'B'
-System.out.println(small + " " + truncated + " " + code + " " + letter);
+public class Casts {
+    public static void main(String[] args) {
+        int big = 300;
+        byte small = (byte) big;        // 300 wraps to 44
+        double d = 3.99;
+        int truncated = (int) d;        // 3: truncates toward zero, does not round
+        int code = 'A';                 // char widens to int automatically: 65
+        char letter = (char) 66;        // 'B'
+        System.out.println(small + " " + truncated + " " + code + " " + letter);
+    }
+}
 ```
 
-Reference casts work differently: a cast to a subtype is checked at run time and throws `ClassCastException` if the object is not an instance of that type.
+Reference casts work differently. A cast to a subtype is checked at run time, and it throws `ClassCastException` if the object is not an instance of that type.
 
-## How it works / Step by step
+```mermaid
+flowchart TD
+    A[Write Hello.java] --> B[javac compiles to Hello.class]
+    B --> C[java runs the main method]
+    C --> D[Statements run top to bottom]
+    D --> E[Method calls push frames]
+    E --> F[Return pops the frame]
+```
 
-1. Write the class with a `public static void main(String[] args)` method. The file name matches the class name.
-2. Run `javac` to produce bytecode, then `java` with the class name.
-3. The JVM calls `main`, which runs statements top to bottom.
-4. Method calls push a frame on the stack; `return` pops it and passes back a value.
-5. Narrowing casts truncate; widening casts happen automatically.
+### Step by step
+
+1. Write the class with a `public static void main(String[] args)` method. The file name matches the public class name.
+2. Run `javac` to produce bytecode, then run `java` with the class name.
+3. The JVM calls `main`, which runs its statements top to bottom.
+4. A method call pushes a frame on the stack. `return` pops it and passes back a value.
+5. A narrowing cast truncates or wraps. A widening cast happens automatically.
+
+## Where it is used
+
+- Command-line tools and scripts, which read `args` and print results.
+- Coding tests and interview exercises, which often start with `Scanner` input.
+- Small utilities and build helpers that run with `java File.java`.
+- Every larger project, since the same structure, naming, and casting rules apply inside classes and packages.
+
+## Benefits
+
+- The compiler enforces the basic rules, so many mistakes are reported before the program runs.
+- Consistent naming makes code easier to scan, even in a project you have never seen.
+- Knowing how casts and `Scanner` behave prevents a class of silent bugs in input handling and arithmetic.
+
+## Cons and limits
+
+- Narrowing casts can lose data without any error. The compiler only checks that the cast is legal, not that the value fits.
+- `Scanner` is simple, but it is slow for large inputs and its token rules surprise beginners.
+- Naming conventions are not enforced by the compiler, so a team must agree on them and check them in review.
+- The `public` class rule means small experiments in one file often need extra classes or non-public names.
 
 ## Common pitfalls
+
 - Naming the file differently from the public class. The compiler reports "class X is public, should be declared in a file named X.java".
 - Treating `"Hello"` and `'H'` as the same kind of value. Double quotes are `String`, single quotes are `char`.
 - Expecting `(int) 3.99` to round to 4. It truncates to 3.
@@ -203,14 +261,29 @@ Reference casts work differently: a cast to a subtype is checked at run time and
 - Assuming `args[0]` exists. Always check `args.length` first.
 - Using a keyword such as `class` or `default` as a variable name.
 
+## Best practices
+
+- Use descriptive names. `orderTotal` says more than `ot`.
+- Keep `main` short. Call methods that do the real work, so the logic can be tested.
+- Read input with `try` around the `Scanner` or reader, so the resource is always closed.
+- Use `java.time` for dates and `Math.addExact` when overflow should be an error.
+- Compile with warnings turned on, and fix them before you commit the code.
+
 !!! tip "Interview tip"
-    **Q: Is Java pass-by-value or pass-by-reference?** Java is always pass-by-value. For objects, the value passed is a copy of the reference, so the method can change the object's fields but cannot make the caller's variable point to a different object. Swapping two object references inside a method does not swap them for the caller.
+    **Q: Is Java pass-by-value or pass-by-reference?** Java is always pass-by-value. For objects, the value passed is a copy of the reference. The method can change the object's fields, but it cannot make the caller's variable point to a different object. Swapping two object references inside a method does not swap them for the caller.
 
 ## Quick recap
-- A Java program is a class with a `public static void main(String[] args)` method; the file name matches the public class.
-- `javac` compiles to bytecode; `java ClassName` runs it, and `java File.java` runs a single file since Java 11.
-- Naming conventions are a convention, not a rule, but keywords and identifier rules are enforced.
-- `Scanner.nextInt()` leaves the line break behind; consume it with `nextLine()`.
-- Widening casts are automatic; narrowing casts truncate or wrap, so check the value range first.
+
+- A Java program is a class with a `public static void main(String[] args)` method. The file name matches the public class name.
+- `javac` compiles to bytecode. `java ClassName` runs it, and `java File.java` runs a single file since Java 11.
+- Naming conventions are a convention, not a rule. Keywords and identifier rules are enforced.
+- `Scanner.nextInt()` leaves the line break behind. Consume it with `nextLine()`.
+- Widening casts are automatic. Narrowing casts truncate or wrap, so check the value range first.
+
+## Official documentation
+
+- [Java Language Specification, SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [JDK 21 API Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Java Developer Site](https://dev.java/)
 
 **See also:** [Data Types and Variables](data-types-variables.md), [Operators and Control Flow](operators-control-flow.md), [Environment Setup](environment-setup.md)

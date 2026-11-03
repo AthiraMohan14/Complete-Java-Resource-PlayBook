@@ -1,53 +1,53 @@
 # Phases 7 to 9: Delivery, Design and Advanced Topics
 
-This part covers weeks 50 onward. Phase 7 packages and runs services: containers, Kubernetes, pipelines, and cloud platforms. Phase 8 covers system design and observability. Phase 9 covers API design and the advanced topics you pick up as needed.
+This part starts at week 50. Phase 7 is about packaging and running services: containers, Kubernetes, pipelines, and cloud platforms. Phase 8 covers system design and observability. Phase 9 covers API design and the advanced topics you pick up as your work requires them.
 
 ---
 
 ## Phase 7: DevOps and Cloud Deployment (weeks 50-63)
 
-Phase 7 has four topics and takes about fourteen weeks. Docker and Kubernetes are the most common interview subjects in this phase.
+Phase 7 contains four topics and takes about fourteen weeks. Docker and Kubernetes come up most often in interviews from this phase.
 
 ### Topic 15: Docker (1-2 weeks)
 
 **Fundamentals (3-4 days)**
 
-- Containers share the host kernel. They isolate processes with namespaces and limit resources with cgroups. A virtual machine runs its own kernel.
-- Image layers and base images. Each instruction in a Dockerfile adds a layer, and unchanged layers are reused from the cache.
-- Dockerfile instructions: `FROM`, `RUN`, `COPY`, `EXPOSE`, `ENTRYPOINT`, and `CMD`. `ENTRYPOINT` sets the executable, and `CMD` gives its default arguments.
-- Multi-stage builds, which compile in one stage and copy only the output into a smaller runtime image.
+- Containers share the host's kernel and isolate processes with namespaces, while cgroups cap their resources. A virtual machine boots its own kernel.
+- Image layers and base images. Every Dockerfile instruction creates a layer, and layers that have not changed come from the build cache.
+- Dockerfile instructions: `FROM`, `RUN`, `COPY`, `EXPOSE`, `ENTRYPOINT`, and `CMD`. `ENTRYPOINT` fixes the executable, and `CMD` supplies its default arguments.
+- Multi-stage builds: compile in one stage, then copy only the result into a slimmer runtime image.
 - Image tags and registries.
 
 **Running containers (2-3 days)**
 
 - `docker run` with ports, volumes, environment variables, and networks.
-- Named volumes and bind mounts, and when each one fits.
+- Named volumes versus bind mounts, and the situations that suit each.
 - Health checks, logs, and `docker exec` for debugging.
 
 **Docker Compose (2-3 days)**
 
-- Describing several containers in one `docker-compose.yml` file.
-- Service dependencies and health-based startup order.
-- Environment overrides with files and variables.
+- Describing several containers in a single `docker-compose.yml` file.
+- Service dependencies and startup order based on health.
+- Overriding environment settings through files and variables.
 
 **Spring Boot and Docker (1-2 days)**
 
-- Layered JARs, which let Docker cache the dependency layers separately from the application code.
-- JVM settings inside containers. The JVM reads container memory limits in current versions, but heap settings still need a check.
-- Run as a non-root user, and set resource limits.
+- Layered JARs, so Docker can cache dependency layers apart from application code.
+- JVM settings inside containers. Current JVMs read container memory limits, but heap sizing still needs checking.
+- Running as a non-root user, and setting resource limits.
 
 ### Topic 16: Kubernetes (2-3 weeks)
 
-**Week 1: architecture and core objects**
+**Week 1 focus: control plane and basic objects**
 
-- The control plane: the API server, the scheduler, the controller manager, and etcd.
-- The worker nodes: the kubelet, kube-proxy, and a container runtime.
-- Pods, the smallest deployable unit. Containers in a pod share a network namespace.
-- Deployments and ReplicaSets, and how rolling updates and rollbacks work.
+- The control plane: API server, scheduler, controller manager, and etcd.
+- The worker nodes: kubelet, kube-proxy, and a container runtime.
+- Pods, the smallest unit you can deploy. Containers in one pod share a network namespace.
+- Deployments and ReplicaSets, and the mechanics of rolling updates and rollbacks.
 
 **Week 2: configuration and workloads**
 
-- ConfigMaps and Secrets. A Secret is base64-encoded, not encrypted, unless the cluster enables encryption at rest.
+- ConfigMaps and Secrets. A Secret is only base64-encoded unless the cluster encrypts data at rest.
 - PersistentVolumes and PersistentVolumeClaims.
 - StatefulSets for stable identities, DaemonSets for one pod per node, and Jobs and CronJobs for batch work.
 - Services: ClusterIP, NodePort, and LoadBalancer.
@@ -55,7 +55,7 @@ Phase 7 has four topics and takes about fourteen weeks. Docker and Kubernetes ar
 
 **Week 3: operations and packaging**
 
-- Probes: liveness, readiness, and startup. A failing liveness probe restarts the container. A failing readiness probe removes the pod from service endpoints.
+- Probes: liveness, readiness, and startup. A failing liveness probe restarts the container, while a failing readiness probe pulls the pod out of service endpoints.
 - Network policies, and service meshes such as Istio or Linkerd.
 - RBAC, resource quotas, and namespaces.
 - Helm for packaging charts with templated values.
@@ -87,54 +87,54 @@ spec:
 
 ### Topic 17: CI/CD Pipelines (1-2 weeks)
 
-**Branching models (2-3 days)**
+**Branching patterns (2-3 days)**
 
-- Git Flow: long-lived `main` and `develop` branches with release and hotfix branches.
-- GitHub Flow: short feature branches merged through pull requests into `main`.
-- Trunk-based development: small changes merged to the trunk often, with feature flags for unfinished work.
+- Git Flow: long-lived `main` and `develop` branches, with release and hotfix branches.
+- GitHub Flow: short feature branches that reach `main` through pull requests.
+- Trunk-based development: small changes merged to the trunk frequently, with feature flags hiding unfinished work.
 - Commit message conventions, which make release notes easier to generate.
 
-**Continuous integration (3-4 days)**
+**CI stage (3-4 days)**
 
-- GitHub Actions: workflows, events, jobs, and steps.
+- GitHub Actions: workflows, triggers, jobs, and steps.
 - Jenkins: scripted and declarative pipelines.
-- GitLab CI: `.gitlab-ci.yml` and runners.
+- GitLab CI: `.gitlab-ci.yml` files and runners.
 - Build, unit tests, and static analysis on every change.
-- Quality gates with SonarQube or Checkmarx, set to block a merge when they fail.
+- Quality gates with SonarQube or Checkmarx, configured to block a merge when they fail.
 
-**Continuous deployment (3-4 days)**
+**Release automation (3-4 days)**
 
-- Deployment strategies: blue-green, canary, rolling, and shadow. Each trades cost, speed, and risk differently.
+- Rollout approaches: blue-green, canary, rolling, and shadow. Each trades cost, speed, and risk differently.
 - Infrastructure as code with Terraform, CloudFormation, or Ansible.
-- Secrets in the pipeline: use the CI system's secret store, and never print secrets in logs.
-- Post-deployment checks and automatic rollback when health checks fail.
+- Secrets in the pipeline: rely on the CI system's secret store, and never print secrets to logs.
+- Post-deployment checks, with automatic rollback when health checks fail.
 
 ### Topic 18: Cloud Platforms (2-3 weeks)
 
-**AWS (about one week)**
+**AWS (one week, roughly)**
 
 - Compute: EC2, Elastic Beanstalk, ECS, EKS, and Lambda.
 - Storage: S3, EBS, and EFS.
 - Databases: RDS, DynamoDB, and Aurora.
 - Networking: VPC, Application and Network Load Balancers, and Route 53.
 - Identity: IAM and KMS.
-- Monitoring: CloudWatch for metrics and logs, and CloudTrail for API activity.
+- Monitoring: CloudWatch for metrics and logs, CloudTrail for API activity.
 
 **Azure (2-3 days)**
 
 - Compute: virtual machines, App Service, and AKS.
 - Data: Azure SQL Database and Cosmos DB.
 - Networking: virtual networks and Application Gateway.
-- DevOps: Azure Pipelines and Azure DevOps. For identity, Microsoft Entra ID replaces Azure Active Directory in current documentation.
+- DevOps: Azure Pipelines and Azure DevOps. In current documentation, Microsoft Entra ID has taken over the name Azure Active Directory.
 
 **GCP (2-3 days)**
 
-- Compute: Cloud Run, GKE, and Cloud Functions.
-- Data: BigQuery, Firestore, and Cloud SQL.
-- Networking: Cloud Load Balancing and Cloud CDN.
+- Compute services: Cloud Run, GKE, Cloud Functions.
+- Data stores: BigQuery, Firestore, Cloud SQL.
+- Networking: Cloud Load Balancing plus Cloud CDN.
 - DevOps: Cloud Build and Artifact Registry.
 
-**Interview tip:** compare the three clouds by the service that matches a job, not by the list of products. For example, "run a container without managing servers" maps to Fargate, Cloud Run, or Azure Container Apps.
+**Interview tip:** compare the three clouds by the service that fits a job, rather than by a product catalog. For example, "run a container without managing servers" maps to Fargate, Cloud Run, or Azure Container Apps.
 
 ---
 
@@ -144,25 +144,25 @@ Phase 8 has two topics that take about seven weeks.
 
 ### Topic 19: System Design (2-3 weeks)
 
-**Week 1: core concepts**
+**Week 1 focus: key ideas**
 
-- **Scalability:** vertical scaling adds resources to one machine. Horizontal scaling adds machines.
-- **Availability:** redundancy and failover. SLI is a measured value, SLO is a target for it, and SLA is a contract with consequences.
-- **Consistency:** strong, eventual, and causal. Each one trades latency and availability for stronger guarantees.
-- **CAP theorem:** during a network partition, a system must choose between consistency and availability.
-- **Performance:** latency, throughput, and bandwidth, and how they differ.
+- **Scalability:** vertical scaling makes one machine bigger. Horizontal scaling adds more machines.
+- **Availability:** redundancy and failover. An SLI is a measured value, an SLO is the target for that value, and an SLA is a contract with consequences attached.
+- **Consistency:** strong, eventual, and causal. Each model gives up some latency or availability in exchange for stronger guarantees.
+- **CAP theorem:** when a network partition occurs, a system has to pick consistency or availability.
+- **Performance:** latency, throughput, and bandwidth, and how they differ from one another.
 
 **Week 2: high-level building blocks**
 
-- **Load balancing:** round robin, least connections, and hashing. Layer 4 balances connections, layer 7 balances requests.
-- **Caching:** cache-aside, write-through, and write-behind. Choose a TTL and an invalidation rule for each cache.
+- **Load balancing:** round robin, least connections, and hashing. Layer 4 balances connections, while layer 7 balances individual requests.
+- **Caching:** cache-aside, write-through, and write-behind. Pick a TTL and an invalidation rule for each cache.
 - **Database scaling:** read replicas, sharding, and replication lag.
-- **Message queues:** move slow work off the request path.
-- **CDN:** serve static content from locations close to users.
+- **Message queues:** take slow work off the request path.
+- **CDN:** serve static content from edge locations near users.
 
 **Week 3: design problems**
 
-Practise a full design for each of these. Start with requirements and estimates, then draw the components, then go deeper on the hardest part.
+Practise a complete design for each of these. Begin with requirements and estimates, draw the components, then go deeper into the hardest part.
 
 - **URL shortener:** key generation, collisions, and redirect paths.
 - **Chat system:** real-time delivery, presence, and message history.
@@ -171,15 +171,15 @@ Practise a full design for each of these. Start with requirements and estimates,
 - **Ride sharing:** matching drivers to riders, location updates, and pricing.
 - **Hotel booking:** availability, concurrent reservations, and holds.
 
-**Interview tip:** for each design, name the bottleneck first. A design that scales the wrong component is not an answer.
+**Interview tip:** for each design, name the bottleneck first. A design that scales the wrong component does not answer the question.
 
 ### Topic 20: Observability and Monitoring (1-2 weeks)
 
-**Logging (2-3 days)**
+**Log handling (2-3 days)**
 
-- SLF4J as the facade, with Logback or Log4j2 underneath.
+- SLF4J as the abstraction layer over Logback or Log4j2.
 - The Elastic stack for search and dashboards: Elasticsearch, Logstash, and Kibana.
-- Structured JSON logs and correlation IDs that link the lines of one request.
+- Structured JSON logs, and correlation IDs that tie together the lines belonging to one request.
 - Log levels, and sampling for high-volume paths.
 
 **Metrics (2-3 days)**
@@ -193,7 +193,7 @@ Practise a full design for each of these. Start with requirements and estimates,
 
 - Micrometer Tracing, which replaced Spring Cloud Sleuth, creates trace and span IDs and passes them between services.
 - Zipkin and Jaeger store and display traces.
-- OpenTelemetry is the vendor-neutral standard for traces, metrics, and logs.
+- OpenTelemetry is the vendor-neutral standard covering traces, metrics, and logs.
 
 **Alerting and health (2 days)**
 
@@ -205,42 +205,42 @@ Practise a full design for each of these. Start with requirements and estimates,
 
 ## Phase 9: Advanced Topics and Specialization (weeks 71 onward)
 
-Phase 9 has no fixed end date. Pick topics that match the roles you are targeting.
+Phase 9 has no fixed end date. Choose topics that match the roles you are aiming for.
 
 ### Topic 21: API Design and REST Practice (ongoing)
 
 **REST principles**
 
-- Resource-oriented URLs, and a stateless design where each request carries what it needs.
+- Resource-oriented URLs, and a stateless design in which each request carries everything it needs.
 - HTTP methods: `GET` is safe and idempotent. `PUT` and `DELETE` are idempotent. `POST` is neither by default. `PATCH` changes part of a resource.
 - Status codes in the 2xx, 3xx, 4xx, and 5xx ranges, and the most useful code for each case.
-- Content negotiation with the `Accept` header.
+- Content negotiation through the `Accept` header.
 
 **Versioning**
 
-- URL versioning such as `/v1/` and `/v2/` is easy to see and to route.
+- URL versioning such as `/v1/` and `/v2/` is easy to spot and to route.
 - Header or media-type versioning keeps URLs stable.
 - Backward compatibility rules, and a published deprecation timeline.
 
 **Pagination, filtering, and errors**
 
-- Offset pagination is simple but slows on large tables. Cursor (seek) pagination scales better.
+- Offset pagination is simple but gets slow on large tables. Cursor (seek) pagination scales better.
 - Filtering, sorting, and partial responses.
-- Errors in one consistent format. RFC 9457 "Problem Details" is the current standard. It replaces RFC 7807.
-- Idempotency keys so that a retried `POST` does not create a duplicate.
+- Errors in one consistent format. RFC 9457 "Problem Details" is the current standard, replacing RFC 7807.
+- Idempotency keys, so that a retried `POST` does not create a duplicate.
 
 **Other protocols**
 
-- GraphQL for flexible queries by the client.
+- GraphQL for flexible queries shaped by the client.
 - gRPC for typed, binary calls between services.
-- WebSockets for two-way messages over one connection.
+- WebSockets for two-way messages over a single connection.
 
 ### Topic 22: AI Integration (ongoing)
 
 **LLM integration**
 
-- Calling model APIs from OpenAI, Anthropic Claude, or Google Gemini. Each has its own SDK and its own request format.
-- Prompt design and context management. Keep the instructions separate from user data.
+- Calling model APIs from OpenAI, Anthropic Claude, or Google Gemini. Each provider has its own SDK and request format.
+- Prompt design and context management. Keep instructions separate from user data.
 - Token limits, temperature, and other sampling parameters, and what each one changes.
 - Handle timeouts, rate limits, and partial failures the same way you handle any remote call.
 
@@ -252,13 +252,13 @@ Phase 9 has no fixed end date. Pick topics that match the roles you are targetin
 
 **Vector databases**
 
-- Options include Pinecone, Weaviate, Milvus, and Chroma. Each one has different hosting and filtering features.
+- Options include Pinecone, Weaviate, Milvus, and Chroma. Each has different hosting and filtering features.
 - Similarity metrics such as cosine similarity and dot product.
-- Approximate nearest neighbour indexes trade a little recall for much faster search.
+- Approximate nearest neighbour indexes give up a little recall in exchange for much faster search.
 
 **Spring AI**
 
-- Chat models and embedding models behind one interface.
+- Chat models and embedding models exposed through one interface.
 - Tool calling, where the model asks the application to run a function and then uses the result.
 - Structured output, which maps a model response onto a Java type.
 

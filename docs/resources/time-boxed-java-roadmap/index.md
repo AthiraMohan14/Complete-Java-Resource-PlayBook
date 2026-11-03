@@ -1,6 +1,9 @@
 # Time-Boxed Java Roadmap
 
-A 6 to 8 month plan for backend Java interviews, split into nine phases and 23 topics. Each phase has a time box, the concepts it covers, and a small deliverable you can show or explain.
+!!! note "In simple words"
+    This is a condensed route to learning backend Java in roughly 6 to 8 months. Go through the phases in sequence, and build each phase's small project before moving on.
+
+This is a 6 to 8 month route to backend Java interview readiness, organized into nine phases and 23 topics. Every phase lists its time budget, its concepts, and a small deliverable you can demo or talk through.
 
 ---
 
@@ -8,19 +11,35 @@ A 6 to 8 month plan for backend Java interviews, split into nine phases and 23 t
 
 ### [Phases 1 to 3: Foundations, DSA and Data](phases-1-to-3.md)
 **Programming basics - Core Java - Modern Java - DSA track - Build tools - SQL - JDBC and JPA**
-Covers the language base, the parallel DSA track, Maven and Gradle, relational databases, and persistence.
+Language fundamentals, the DSA track that runs alongside, Maven and Gradle, relational databases, and persistence.
 
 ### [Phases 4 to 6: Spring, Security and Messaging](phases-4-to-6.md)
 **Spring Core - Spring Boot - Security - Testing - Caching - Kafka - RabbitMQ - Microservices**
-Covers the Spring stack from the container to REST APIs, then authentication, tests, caching, and event-driven services.
+Spring from the container up to REST APIs, followed by authentication, testing, caching, and event-driven services.
 
 ### [Phases 7 to 9: Delivery, Design and Advanced Topics](phases-7-to-9.md)
 **Docker - Kubernetes - CI/CD - Cloud - System design - Observability - API design - AI integration**
-Covers shipping and running services, designing systems at scale, and the advanced topics that come after the core track.
+Shipping and operating services, designing large-scale systems, and specialist topics beyond the core track.
 
 ### [Learning Resources, Tips and Further Reading](learning-resources-and-tips.md)
 **Resources by phase - Study habits - Additional platforms**
-A phase-by-phase list of documentation and practice sites, study habits that shorten the timeline, and where to find community help.
+Documentation and practice sites organized by phase, habits that shorten your schedule, and community help.
+
+---
+
+## Roadmap at a glance
+
+```mermaid
+flowchart TD
+    P1[Foundations and Core Java] --> P2[Data structures and algorithms track]
+    P2 --> P3[Build tools and data layer]
+    P3 --> P4[Spring Framework and Boot]
+    P4 --> P5[Security, testing and caching]
+    P5 --> P6[Messaging and microservices]
+    P6 --> P7[DevOps and cloud]
+    P7 --> P8[System design and observability]
+    P8 --> P9[Advanced topics]
+```
 
 ---
 
@@ -52,15 +71,15 @@ graph TD
 | 8 | System design and observability | 64-70 | Scalability, caching, logs, metrics, tracing |
 | 9 | Advanced topics | 71 onward | API design, GraphQL, gRPC, LLM integration |
 
-The week ranges come from the source roadmap. Phase 2 is shown as weeks 1 to 6 in the diagram and 4 to 6 in the timeline, so treat it as a parallel track of about four to six weeks of focused work.
+Both the diagram and the timeline show Phase 2 as weeks 1 to 6. It is a parallel track, so plan on about four to six weeks of focused work.
 
 ---
 
 ## How to Use the Plan
 
-- Treat each week range as a budget. If a topic takes longer, move on and come back to it with a project.
-- Finish each phase with its deliverable. A working program teaches more than a list of notes.
-- Start the DSA track in week one and keep it going at a steady pace alongside the main track.
-- Revisit the [Java Code Review Guidelines](../code-review-guidelines/java-code-review-guidelines.md) once you start reviewing or writing production-style code.
+- Read each week range as a time budget. When a topic runs over, move on and revisit it through a project.
+- Complete each phase's deliverable before moving on. A working program teaches more than notes do.
+- Begin the DSA track in week one and hold a steady pace next to the main curriculum.
+- Come back to the [Java Code Review Guidelines](../code-review-guidelines/java-code-review-guidelines.md) once you begin reviewing or writing production-grade code.
 
 **See also:** [Learning resources and tips](learning-resources-and-tips.md), [Interview questions](../../interview-questions/index.md), [System design interview questions](../../interview-questions/technical/architecture-and-distributed.md)

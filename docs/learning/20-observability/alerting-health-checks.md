@@ -1,18 +1,51 @@
 # Alerting and Health Checks
 
-Alerts tell a person that something needs action. Health checks tell an orchestrator whether an instance should receive traffic or be restarted. Interviewers ask about these to see whether you can separate noise from signal and whether you understand what liveness and readiness mean.
+!!! note "In simple words"
+    An alert pages a human when users are being hurt. A health check lets the platform decide whether a copy of the app should receive traffic or be restarted. Good alerts are few and specific, and every one of them calls for a person to do something.
 
-## Core concepts
+Alerts ask people to act. Health checks let an orchestrator decide between sending traffic and restarting. Interviewers use these topics to see whether you can filter noise from real signal, and whether you understand the difference between liveness and readiness.
+
+## Why it matters
+
+An alerting setup can fail in two directions. Real outages go unnoticed, or the on-call engineer receives so many pages that they stop trusting them. Health checks fail similarly. A check that is too strict keeps restarting healthy instances, and one that is too lenient keeps broken instances in service. Getting both right protects customers and the people who respond to incidents.
+
+## How it works
+
+A rule checks a condition on a schedule. Once the condition has held long enough, the alert fires, a router decides who hears about it, and escalation starts if nobody picks it up. Health probes run on their own track, and they drive the platform's decisions to restart or to route traffic.
+
+```mermaid
+flowchart LR
+    Signal[Metric shows bad condition] --> Rule[Alert rule checks each interval]
+    Rule --> Wait{Held for the for duration}
+    Wait -- no --> Rule
+    Wait -- yes --> Fire[Alert fires]
+    Fire --> Router[Alertmanager groups and routes]
+    Router --> Page[On-call person paged]
+    Page --> Ack{Acknowledged in time}
+    Ack -- no --> Escalate[Escalate to next responder]
+```
+
+A step-by-step view:
+
+1. A metric or a log reveals something abnormal, such as 5xx responses climbing.
+2. The alert rule evaluates the condition at each interval, and waits out the `for` duration.
+3. The alert fires and is passed to Alertmanager or a comparable router.
+4. The router merges related alerts, applies any silences, and pages the on-call person.
+5. If the page goes unacknowledged, it moves up to the next responder.
+6. Health probes run separately. A failing liveness probe restarts the process, and a failing readiness probe pulls the instance out of rotation.
 
 ### SLI, SLO, error budget, and SLA
-These four terms describe how reliability is measured and promised:
 
-- **SLI (service level indicator)**: a measured signal, usually a ratio of good events to valid events. Example: the share of HTTP requests that return a non-5xx response in under 300 ms.
-- **SLO (service level objective)**: the target for an SLI over a time window. Example: 99.9% of requests are good over 30 days.
-- **Error budget**: the allowed amount of failure, which is 100% minus the SLO. It is the room the team has to take risks, such as deploying or running experiments, before users are affected too often.
-- **SLA (service level agreement)**: a contract with customers that includes consequences, such as credits, if the promise is missed. An SLA is usually looser than the internal SLO, so the team sees trouble before the contract is breached.
+Four terms describe how reliability is measured and promised:
 
-Worked example for an order API with a 99.9% SLO over 30 days:
+- **SLI (service level indicator).** A measurement, normally a ratio of good events to all valid events. An example is the share of HTTP responses that are not 5xx and arrive in under 300 ms.
+- **SLO (service level objective).** The goal for an SLI across a window of time. An example is 99.9% of requests being good across 30 days.
+- **Error budget.** The permitted amount of failure, equal to 100% minus the SLO. The team spends this budget on risk, such as releases and experiments, and users are not hurt too often as a result.
+- **SLA (service level agreement).** A customer contract that attaches consequences, such as credits, to a missed target. An SLA is typically looser than the internal SLO, so the team gets warned before the contract is broken.
+
+The reasoning behind SLOs is laid out in the [Google SRE book chapter on service level objectives](https://sre.google/sre-book/service-level-objectives/).
+
+Here is a worked example for an order API with a 99.9% SLO over 30 days:
 
 ```text
 Valid requests in the window:  10,000,000
@@ -24,21 +57,21 @@ Bad requests so far = 10,000,000 - 9,995,000  = 5,000
 Budget consumed = 5,000 / 10,000 = 50%
 ```
 
-Half the budget is already spent, so the team might slow risky releases until the window recovers. The budget turns a reliability target into a decision rule: release freely while budget remains, and focus on reliability work when it runs out.
+Half the budget is gone, so the team might hold back risky releases until the window recovers. The budget converts a reliability target into a decision rule: ship freely while budget remains, and prioritise reliability work once it is exhausted.
 
 ### Alert on symptoms, not causes
 
-Alert on what users feel: high latency, failed requests, a missing feature. Causes such as high CPU are useful on dashboards, but an alert on CPU wakes someone up even when users are fine. A symptom alert usually ties to an SLO (service level objective), such as "99.9% of requests succeed over 30 days". Alerting on how fast the error budget is burning is a common approach, because it fires quickly for a severe incident and slowly for a minor one.
+Base alerts on what users experience, such as slow responses, failed requests, or a broken feature. Causes such as high CPU belong on dashboards. Paging on CPU wakes someone even when users are fine. Symptom alerts map naturally onto an SLO. Alerting on the rate at which the error budget is being consumed is a popular approach, because it reacts quickly to a severe incident and slowly to a minor one.
 
 ### Thresholds and conditions
 
 An alert condition has three parts:
 
-1. **Expression:** what is measured, such as the error ratio over five minutes
-2. **Threshold:** the value that counts as bad
-3. **Duration:** how long the condition must hold before firing
+1. **Expression.** What is being measured, such as the error ratio over five minutes.
+2. **Threshold.** The value regarded as bad.
+3. **Duration.** How long the condition must persist before the alert fires.
 
-The duration matters. Without it, a single spike pages someone. Here is a Prometheus-style rule as an example of the shape. It fires when the five-minute error ratio stays above 5% for ten minutes:
+The duration is essential. Without it, one spike pages someone. The Prometheus-style rule below illustrates the shape. It fires when the five-minute error ratio remains above 5% for ten minutes:
 
 ```text
 alert: HighErrorRate
@@ -53,27 +86,27 @@ annotations:
   summary: "Error ratio above 5% for 10 minutes"
 ```
 
-The 5% threshold is an example. Choose thresholds from your SLO and from past incidents, not from a number you read somewhere.
+The 5% figure is only an example. Derive thresholds from your SLO and from past incidents, not from numbers copied from somewhere else.
 
 ### Routing, escalation, and on-call
 
-An alert needs a route: which team, which channel, and what happens if nobody acknowledges it. An **on-call rotation** is a schedule of people who respond to pages. **Escalation** moves an unacknowledged page to a second responder after a set time.
+Every alert needs a path: the owning team, the channel, and the fallback when nobody answers. An **on-call rotation** is the schedule of people who answer pages. **Escalation** passes an unanswered page to a second person after a fixed interval.
 
-Alerting platforms such as **PagerDuty** and **Opsgenie** handle schedules, acknowledgement, escalation, and notification channels. Prometheus sends alerts to **Alertmanager**, which groups, silences, and routes them to receivers like these.
+Paging products such as PagerDuty take care of schedules, acknowledgement, escalation, and notification channels. Opsgenie has been affected by a vendor product change, so verify its status before selecting it. Prometheus hands its alerts to **Alertmanager**, which groups them, applies silences, and sends them to receivers like these.
 
 ### Reducing alert fatigue
 
-Alert fatigue happens when people receive so many pages that they ignore them. Remedies:
+Alert fatigue sets in when pages arrive so often that people start ignoring them. Ways to counter it:
 
-- Delete alerts nobody acts on. Every page should lead to an action.
-- Group related alerts. One outage should produce one page, not fifty.
-- Use the `for` duration so transient spikes do not page.
-- Separate **pages** (act now, day or night) from **tickets** (act during working hours).
-- Review alerts after each incident and tune them.
+- Remove alerts that nobody acts on. Each page should lead to a concrete action.
+- Group related alerts, so one outage yields one notification and not fifty.
+- Set a `for` duration, so transient spikes stay quiet.
+- Keep **pages** (act now, at any hour) apart from **tickets** (act during working hours).
+- Review the alert list after every incident, and retune it.
 
 ### Health checks with Spring Boot Actuator
 
-Spring Boot Actuator exposes health information at `/actuator/health`. It aggregates **health indicators**, one per component (database, disk space, message broker). You can add your own indicator:
+Actuator serves health information at `/actuator/health`. It combines **health indicators**, one for each component such as the database, disk space, or message broker. Custom indicators can be added. This library example needs Spring Boot Actuator on the classpath, so it is not compiled here:
 
 ```java
 import org.springframework.boot.actuate.health.Health;
@@ -107,51 +140,79 @@ public class PaymentGatewayHealthIndicator implements HealthIndicator {
 }
 ```
 
-Keep the check cheap. A health endpoint that calls three external systems on every probe can itself cause an outage.
+Keep the check light. If a health endpoint calls three external systems on every probe, the probes themselves can take those systems down.
 
 ### Liveness and readiness probes
 
-Orchestrators such as Kubernetes use two different probes:
+Kubernetes and similar orchestrators run two distinct probes. The [Kubernetes probe guide](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) explains each one.
 
-| Probe | Question it answers | If it fails |
+| Probe | Question answered | Result on failure |
 |---|---|---|
-| Liveness | Is the process stuck or broken beyond recovery? | The instance is restarted |
-| Readiness | Can this instance serve traffic right now? | The instance is removed from load balancing, but not restarted |
+| Liveness | Is the process stuck or unrecoverably broken? | The instance is restarted |
+| Readiness | Can this instance take requests at this moment? | The instance is removed from the load balancer, but not restarted |
 
-Spring Boot exposes these as separate health groups. Enable them with `management.endpoint.health.probes.enabled=true`, and they appear at `/actuator/health/liveness` and `/actuator/health/readiness`.
+Spring Boot publishes these as health groups. Turn them on with `management.endpoint.health.probes.enabled=true`, after which they are served at `/actuator/health/liveness` and `/actuator/health/readiness`.
 
-Liveness should not depend on external systems. If the database is down, restarting the app does not fix it, and a restart loop makes things worse. Readiness can check dependencies, so traffic stops reaching an instance that cannot serve it.
+Liveness should avoid depending on external systems. When the database is down, restarting the app does not bring the database back, and repeated restarts make matters worse. Readiness is the right place for dependency checks, since it keeps traffic away from an instance that cannot serve it.
 
-Tune the probe timing. Set an initial delay long enough for startup, a timeout shorter than the period, and a failure threshold that tolerates a brief hiccup.
+Probe timing needs tuning as well: an initial delay long enough for start-up, a timeout shorter than the period, and a failure threshold that tolerates a short hiccup.
 
-## How it works
+## Where it is used
 
-1. Metrics or logs show an unusual condition, such as rising 5xx responses.
-2. An alert rule evaluates the condition every interval and waits for the `for` duration.
-3. The alert fires and goes to Alertmanager or a similar router.
-4. The router groups the alert, applies silences, and pages the on-call person.
-5. If unacknowledged, the page escalates to the next responder.
-6. Orchestrator probes run separately: liveness restarts broken processes, and readiness controls traffic.
+- Paging on user-facing outages, such as a jump in failed checkouts.
+- Ticket-level alerts for slow disk growth, or a certificate due to expire next month.
+- Kubernetes deployments, where liveness restarts broken pods and readiness governs traffic.
+- Load balancer target groups, which send traffic only to instances that pass their checks.
+
+## Benefits
+
+- **Fewer, sharper pages** when alerts follow symptoms and SLOs.
+- **Quick detection** of user-facing faults through short, clear rules.
+- **Self-healing** for stuck processes via liveness probes.
+- **Careful traffic control** through readiness, so a warming instance does not get requests too soon.
+
+## Cons and limits
+
+- **Thresholds are judgement calls** that need regular review.
+- **Symptom alerts arrive later** than cause-based alerts. Dashboards can reveal causes earlier.
+- **Health checks add load** on dependencies when they are deep or frequent.
+- **Badly set probes** produce restart loops or stale routing.
+- **Routing depends on people.** A well-written rule with no owner still fails.
+
+## Best practices
+
+- Alert on symptoms tied to an SLO, and use burn-rate alerts for the error budget where possible.
+- Give each alert a threshold, a duration, a route, and a documented response.
+- Keep pages separate from tickets, and review the list after each incident.
+- Restrict liveness to internal health, and place dependency checks in readiness.
+- Keep health endpoints cheap, and protect them when they reveal internal detail.
+- Set probe delays, timeouts, and failure thresholds from the application's real start-up time.
 
 ## Common pitfalls
 
-- Alerting on causes (CPU, memory) instead of symptoms users feel
-- No `for` duration, so a single data point pages someone
-- Health checks that are slow, call many services, or are exposed without protection
-- Using a dependency check in liveness, which causes restart loops during an external outage
-- Paging for things that do not need action right now
-- Never reviewing alerts, so noise accumulates
+- Alerting on causes such as CPU or memory instead of the symptoms users feel.
+- Omitting the `for` duration, so one data point pages someone.
+- Health checks that are slow, call many services, or are exposed without protection.
+- Placing a dependency check in liveness, which triggers restart loops during an external outage.
+- Paging for conditions that need no action right away.
+- Never reviewing alerts, so noise accumulates unchecked.
 
 !!! tip "Interview tip"
     **Q: What is the difference between liveness and readiness?**
-    A: Liveness answers "should this process be restarted?" Readiness answers "should this instance receive traffic?" A process can be alive but not ready while it warms caches or waits for a database. Keep dependency checks in readiness, and keep liveness limited to internal health, so an external outage does not cause a restart storm.
+    Liveness asks "should this process be restarted?" Readiness asks "should this instance get traffic?" A process can be alive yet not ready while it warms caches or waits on a database. Put dependency checks in readiness, and keep liveness limited to internal health, so an external outage cannot set off a restart storm.
 
 ## Quick recap
 
-- Alert on symptoms tied to SLOs, not on raw causes
-- Every alert needs a threshold, a duration, a route, and an action
-- Reduce fatigue by grouping, tuning, and separating pages from tickets
-- Actuator aggregates health indicators; add custom ones for key dependencies
-- Liveness restarts broken processes; readiness controls traffic
+- Alert on symptoms tied to SLOs, rather than on raw causes.
+- Every alert needs a threshold, a duration, a route, and an action.
+- Cut fatigue by grouping alerts, tuning them, and separating pages from tickets.
+- Actuator combines health indicators, and custom ones cover key dependencies.
+- Liveness restarts broken processes, and readiness controls traffic.
+
+## Official documentation
+
+- [Prometheus overview](https://prometheus.io/docs/introduction/overview/)
+- [Kubernetes: configure liveness, readiness, and startup probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+- [Google SRE book: service level objectives](https://sre.google/sre-book/service-level-objectives/)
 
 **See also:** [Logging](logging.md), [Metrics](metrics.md), [Distributed Tracing](distributed-tracing.md)

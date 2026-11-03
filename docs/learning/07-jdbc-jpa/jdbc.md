@@ -1,12 +1,24 @@
 # JDBC
 
-JDBC (Java Database Connectivity) is the standard Java API for running SQL against relational databases. Interviewers ask about it because every higher-level tool, including JPA and Spring's `JdbcTemplate`, runs on top of it, and the questions reveal whether you understand connections, statements, SQL injection, and transactions.
+!!! note "In simple words"
+    JDBC is the standard Java way to send SQL to a database and read the rows that come back. A vendor driver does the low-level talking, and your code works with a small set of interfaces such as `Connection`, `PreparedStatement`, and `ResultSet`.
 
-## Core concepts
+## Why it matters
+
+Every higher-level tool in the Java database stack runs on JDBC. JPA and Hibernate, Spring's `JdbcTemplate`, and MyBatis all end up calling it. Interviewers ask about JDBC because the questions show whether you understand what happens underneath: how connections are opened and reused, why a `PreparedStatement` is safe, how a transaction is started and ended, and how resources must be closed so the application does not leak them.
+
+## How it works
 
 ### Architecture and drivers
 
-The `java.sql` and `javax.sql` packages define the API. Each database vendor ships a **driver** that implements it. Your code depends on the interfaces, and the driver is a runtime dependency.
+The `java.sql` and `javax.sql` packages define the API. Each database vendor ships a **driver** that implements those interfaces. Your code depends on the interfaces, and the driver JAR is a runtime dependency.
+
+```mermaid
+flowchart LR
+    A[Application code] --> B[JDBC API java.sql]
+    B --> C[Vendor driver]
+    C -->|database protocol| D[Database server]
+```
 
 JDBC driver types:
 
@@ -14,10 +26,10 @@ JDBC driver types:
 |---|---|---|
 | 1 | JDBC-ODBC bridge | Removed in Java 8; do not use |
 | 2 | Native API partly in Java | Needs client libraries installed on each machine |
-| 3 | Network protocol (middleware) | Needs a middleware server |
-| 4 | Pure Java, talks the database protocol directly | The usual choice today |
+| 3 | Network protocol through middleware | Needs a middleware server |
+| 4 | Pure Java, speaks the database protocol directly | The usual choice today |
 
-Since JDBC 4.0, drivers on the classpath register themselves through `ServiceLoader`, so you rarely call `Class.forName` by hand. `DriverManager` is the older entry point for getting a connection; in applications, you usually get connections from a `DataSource`.
+Since JDBC 4.0, drivers on the classpath register themselves through `ServiceLoader`, so you rarely call `Class.forName` by hand. `DriverManager` is the older way to get a connection. In applications you usually get connections from a `DataSource`, which is usually backed by a pool.
 
 ```java
 import java.sql.Connection;
@@ -27,20 +39,42 @@ import java.sql.SQLException;
 public class ConnectDemo {
     public static void main(String[] args) throws SQLException {
         String url = "jdbc:postgresql://localhost:5432/shop";   // example URL
-        try (Connection conn = DriverManager.getConnection(url, "app_user", System.getenv("DB_PASSWORD"))) {
+        try (Connection conn = DriverManager.getConnection(
+                url, "app_user", System.getenv("DB_PASSWORD"))) {
             System.out.println("Connected: " + !conn.isClosed());
         }
     }
 }
 ```
 
-Read the password from configuration or the environment, never from source code.
+This should compile with Java 21 when a PostgreSQL driver is on the classpath. Read the password from the environment or from configuration. Never put it in source code.
+
+### Step by step: running a query
+
+1. Get a `Connection` from the `DataSource`. The pool lends one.
+2. Prepare the SQL with `?` placeholders.
+3. Bind the parameters with typed setters such as `setLong` and `setString`.
+4. Execute with `executeQuery` for reads, or `executeUpdate` for writes.
+5. Read the `ResultSet` into objects, then close all the resources.
+6. Commit or roll back if you turned auto-commit off.
 
 ### Connection pooling
 
-Opening a connection is expensive, so applications keep a pool of open connections and borrow them. HikariCP is the default pool in Spring Boot. Other pools include Apache Tomcat JDBC and C3P0.
+Opening a connection is expensive: the driver must authenticate, negotiate settings, and set up a session on the server. Applications therefore keep a **pool** of open connections and lend them out. HikariCP is the default pool in Spring Boot. Other pools include Apache Tomcat JDBC and C3P0.
 
-Key pool settings are the maximum pool size and the connection timeout. A pool that is too large can overload the database; a pool that is too small makes requests queue. Size it from the database's capacity, not from the number of users.
+```mermaid
+sequenceDiagram
+    participant Req as Request thread
+    participant Pool as Connection pool
+    participant DB as Database
+    Req->>Pool: borrow connection
+    Pool-->>Req: idle connection
+    Req->>DB: run statements
+    DB-->>Req: results
+    Req->>Pool: close (returns to pool)
+```
+
+The two most important pool settings are the maximum pool size and the connection timeout. A pool that is too large can overload the database, because each connection is a session that uses server memory and CPU. A pool that is too small makes requests wait for a connection. Size the pool from the database's capacity, not from the number of users.
 
 ### Statements
 
@@ -50,46 +84,54 @@ Key pool settings are the maximum pool size and the connection timeout. A pool t
 | `PreparedStatement` | Parameterised SQL. The default choice. |
 | `CallableStatement` | Stored procedures and functions, with IN, OUT, and INOUT parameters. |
 
-Methods: `executeQuery()` returns a `ResultSet` for `SELECT`; `executeUpdate()` returns the row count for `INSERT`, `UPDATE`, `DELETE`; `execute()` returns a boolean for general statements.
+The execute methods:
+
+- `executeQuery()` returns a `ResultSet` for a `SELECT`.
+- `executeUpdate()` returns the number of affected rows for `INSERT`, `UPDATE`, or `DELETE`.
+- `execute()` returns a boolean and handles any statement, including those that return several results.
 
 ### PreparedStatement and SQL injection
 
-`PreparedStatement` sends the SQL text and the parameter values separately, so input is never parsed as SQL. Building SQL with string concatenation allows SQL injection.
+A `PreparedStatement` sends the SQL text and the parameter values separately. The database parses the SQL once, and the values are treated as data, never as SQL. Building SQL with string concatenation allows SQL injection.
 
 ```java
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 
 public class CustomerLookup {
-    static void find(Connection conn, String email) throws SQLException {
-        // Vulnerable: input such as "x' OR '1'='1" changes the query
-        String bad = "SELECT * FROM customer WHERE email = '" + email + "'";
+
+    static long findCustomerId(Connection conn, String email) throws SQLException {
+        // Vulnerable alternative: "... WHERE email = '" + email + "'"
+        // An input such as "x' OR '1'='1" would change the query.
 
         // Safe: the value is bound as data
-        String good = "SELECT * FROM customer WHERE email = ?";
-        try (PreparedStatement ps = conn.prepareStatement(good)) {
+        String sql = "SELECT customer_id FROM customer WHERE email = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, email);
-            // ps.executeQuery() ...
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : -1L;
+            }
         }
     }
 }
 ```
 
-Parameters cannot replace table or column names. Validate those against an allow-list.
+Parameters cannot replace table or column names. Validate those against an allow-list that your code controls.
 
 ### ResultSet
 
-A `ResultSet` is a cursor over query results. Its type controls movement:
+A `ResultSet` is a cursor over query results. Its type controls how it can move:
 
-- `TYPE_FORWARD_ONLY` (default): move forward only. Lowest memory use.
-- `TYPE_SCROLL_INSENSITIVE` or `TYPE_SCROLL_SENSITIVE`: move in both directions; support depends on the driver.
+- `TYPE_FORWARD_ONLY` (the default) moves forward only and uses the least memory.
+- `TYPE_SCROLL_INSENSITIVE` and `TYPE_SCROLL_SENSITIVE` move in both directions. Support depends on the driver.
 
-Concurrency: `CONCUR_READ_ONLY` (default) or `CONCUR_UPDATABLE`. Read columns by name or index, and check for SQL `NULL` with `wasNull()` after reading a primitive, because `getInt` returns `0` for NULL.
+Its concurrency mode is `CONCUR_READ_ONLY` (the default) or `CONCUR_UPDATABLE`. Read columns by name or by index. SQL `NULL` has a trap: `getInt` returns `0` for NULL, so call `wasNull()` right after reading a primitive, or use `getObject` for a boxed value.
 
 ### BLOB and CLOB values
 
-A BLOB column holds binary data and a CLOB column holds long text. JDBC maps them to `java.sql.Blob` and `java.sql.Clob`. Small values can go in as a `byte[]` or a `String`. Large values should be streamed, so the whole value is never held in memory at once.
+A BLOB column holds binary data, and a CLOB column holds long text. JDBC maps them to `java.sql.Blob` and `java.sql.Clob`. Small values can go in as a `byte[]` or a `String`. Large values should be streamed, so the whole value never sits in memory at once.
 
 | Direction | Small value | Large value, streamed |
 |---|---|---|
@@ -188,15 +230,15 @@ public class DocumentStore {
 
 Points to remember:
 
-- Read the value while the `ResultSet` and transaction are still open. Some drivers invalidate a `Blob` or `Clob` locator when the result set or transaction ends.
+- Read the value while the `ResultSet` and the transaction are still open. Some drivers invalidate a `Blob` or `Clob` locator when the result set or transaction ends.
 - `Blob` and `Clob` positions are 1-based, not 0-based.
-- Call `free()` on a locator when you finish with it, so the driver can release its resources. The `readText` example shows this.
+- Call `free()` on a locator when you finish with it, so the driver can release its resources. `readText` shows this.
 - The one-argument stream setters are JDBC 4.0 forms that do not take a length. Some drivers still need the length, so check your driver's documentation.
-- `getClob` in the example reads the whole value into a `String`. For very large text, read through `getCharacterStream` in chunks instead.
+- `readText` copies the whole value into one `String`. For very large text, read through `getCharacterStream` in chunks instead.
 
 ### Batches
 
-Batching sends many statements in one round trip.
+A batch sends many statements in one round trip, which cuts network latency.
 
 ```java
 import java.sql.Connection;
@@ -205,6 +247,7 @@ import java.sql.SQLException;
 import java.util.List;
 
 public class CustomerBatch {
+
     static void insertEmails(Connection conn, List<String> emails) throws SQLException {
         String sql = "INSERT INTO customer (email) VALUES (?)";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -218,11 +261,11 @@ public class CustomerBatch {
 }
 ```
 
-Batching is faster only when the driver supports it and autocommit is off for large sets. Check the driver's batch options for rewriting.
+Batching helps only when the driver supports it and the batch is large enough to matter. Many drivers also offer an option to rewrite batches into multi-row statements, which is worth checking. For very large loads, commit in chunks rather than in one giant transaction.
 
 ### Stored procedures
 
-`CallableStatement` calls a stored procedure. The `{call ...}` escape syntax is portable across drivers.
+`CallableStatement` calls a stored procedure. The `{call ...}` escape syntax is portable across drivers. The procedure `count_orders` below is an example; it must exist in your database.
 
 ```java
 import java.sql.CallableStatement;
@@ -231,6 +274,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 
 public class CallProc {
+
     static long orderCount(Connection conn, long customerId) throws SQLException {
         try (CallableStatement cs = conn.prepareCall("{call count_orders(?, ?)}")) {
             cs.setLong(1, customerId);
@@ -242,11 +286,30 @@ public class CallProc {
 }
 ```
 
-### Resource management and transactions
+### Resource management
 
-Every `Connection`, `Statement`, and `ResultSet` holds resources. Close them with try-with-resources, and close them in the reverse order they were opened (try-with-resources does this for you).
+Every `Connection`, `Statement`, and `ResultSet` holds resources. Close them with try-with-resources. It closes them in the reverse of the order they were opened, even when an exception is thrown. A `Connection` you borrow from a pool is returned to the pool when you close it, not destroyed.
 
-JDBC runs in auto-commit mode by default: each statement commits on its own. For a unit of work, turn auto-commit off and call `commit()` or `rollback()` yourself, and use savepoints for partial rollback.
+### Transactions in JDBC
+
+JDBC runs in auto-commit mode by default, so each statement commits on its own. For a unit of work, turn auto-commit off, run the statements, and then call `commit()` or `rollback()`. Use savepoints for a partial rollback.
+
+```mermaid
+sequenceDiagram
+    participant App as Service
+    participant Conn as Connection
+    participant DB as Database
+    App->>Conn: setAutoCommit false
+    App->>Conn: debit statement
+    Conn->>DB: UPDATE from account
+    App->>Conn: credit statement
+    Conn->>DB: UPDATE to account
+    alt both succeed
+        App->>Conn: commit
+    else any error
+        App->>Conn: rollback
+    end
+```
 
 ```java
 import java.sql.Connection;
@@ -254,41 +317,71 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
 public class Transfer {
-    static void move(Connection conn, long from, long to, long cents) throws SQLException {
+
+    static void move(Connection conn, long fromId, long toId, long cents) throws SQLException {
+        boolean previousAutoCommit = conn.getAutoCommit();
         conn.setAutoCommit(false);
         try (PreparedStatement debit = conn.prepareStatement(
                  "UPDATE account SET balance = balance - ? WHERE account_id = ?");
              PreparedStatement credit = conn.prepareStatement(
                  "UPDATE account SET balance = balance + ? WHERE account_id = ?")) {
             debit.setLong(1, cents);
-            debit.setLong(2, from);
+            debit.setLong(2, fromId);
             debit.executeUpdate();
+
             credit.setLong(1, cents);
-            credit.setLong(2, to);
+            credit.setLong(2, toId);
             credit.executeUpdate();
+
             conn.commit();
         } catch (SQLException e) {
             conn.rollback();
             throw e;
         } finally {
-            conn.setAutoCommit(true);   // restore the default for the pool
+            conn.setAutoCommit(previousAutoCommit);   // restore what the pool expects
         }
     }
 }
 ```
 
-Returning a connection to a pool with auto-commit off, or with an open transaction, leaks state into the next user. Always restore it.
+Returning a connection to a pool with auto-commit off, or with a transaction still open, leaks that state into the next user of the connection. Always restore it. The `Transfer` example above has no balance check. A production version should guard the debit with `AND balance >= ?` and check the row count, as shown in [Advanced SQL and Transactions](../06-databases-sql/advanced-sql-transactions.md).
 
-## How it works / Step by step
+## Where it is used
 
-Running a query with JDBC:
+- **Data access layers** in plain Java services, where a framework would add more than it saves.
+- **Under JPA, MyBatis, and JdbcTemplate.** Knowing JDBC explains what those tools do on each call.
+- **Batch jobs and data imports** that load large files and need batching and streaming.
+- **Calling stored procedures** that already hold business logic in the database.
 
-1. Get a `Connection` from the `DataSource` (the pool lends one).
-2. Prepare the SQL with `?` placeholders.
-3. Bind parameters with the typed setters (`setLong`, `setString`).
-4. Execute: `executeQuery` for reads, `executeUpdate` for writes.
-5. Read the `ResultSet` into objects, then close all resources.
-6. Commit or roll back if you turned auto-commit off.
+## Benefits
+
+- **Standard API.** The same interfaces work with every relational database that has a driver.
+- **Full control.** You decide exactly which SQL runs and how it is bound and read.
+- **Low overhead.** There is no mapping layer between the statement and the result.
+- **Good fit for streaming and bulk work.** Batches, streamed BLOBs, and forward-only cursors keep memory low.
+
+## Cons and limits
+
+- **Verbose.** Mapping each row to an object by hand takes a lot of code.
+- **Easy to leak resources.** A missed `close()` exhausts the pool and stalls the service.
+- **Checked exceptions everywhere.** `SQLException` forces handling or propagation at every layer.
+- **Vendor differences.** Driver options, `CallableStatement` behaviour, and LOB handling vary by database.
+- **Manual transactions.** Auto-commit and commit or rollback logic are easy to get wrong.
+
+## Best practices
+
+- Use `PreparedStatement` for every statement that takes input.
+- Use a `DataSource` backed by a pool, and size the pool from the database's capacity.
+- Close every resource with try-with-resources. Never close a pooled connection's underlying session yourself.
+- Read the password from the environment or a secrets store.
+- Check `wasNull()` or use `getObject` when a column can be NULL.
+- Restore auto-commit before a connection returns to the pool.
+- Do not swallow `SQLException`. Log it with context, or rethrow it.
+- Stream large BLOB and CLOB values, and free the locators you open.
+
+!!! tip "Interview tip"
+    **Q: Why does a `PreparedStatement` prevent SQL injection?**
+    The SQL structure is sent and parsed separately from the values, so bound values are treated as data and never as SQL keywords. It can also let the database reuse the query plan. It does not protect identifiers such as table names, so those need an allow-list.
 
 ## Common pitfalls
 
@@ -299,16 +392,18 @@ Running a query with JDBC:
 - Opening a new connection per request instead of using a pool.
 - Catching `SQLException` and ignoring it, which hides failed writes.
 
-!!! tip "Interview tip"
-    **Q: Why does a `PreparedStatement` prevent SQL injection?**
-    The SQL structure is sent and parsed separately from the values, so bound values are treated as data and never as SQL keywords. It can also let the database reuse the query plan. Note that it does not protect identifiers such as table names; those need an allow-list.
-
 ## Quick recap
 
-- JDBC is the base API; drivers are type 4 in modern use, and type 1 is gone.
+- JDBC is the base API. Drivers are type 4 in modern use, and type 1 is gone.
 - Use `PreparedStatement` for all input-driven SQL.
-- Pools (HikariCP in Spring Boot) manage connections; always close and reset what you borrow.
-- Batches reduce round trips; `CallableStatement` runs stored procedures.
-- Turn auto-commit off for multi-statement units of work, and roll back on failure.
+- Pools such as HikariCP (the default in Spring Boot) manage connections. Always close and reset what you borrow.
+- Batches reduce round trips. `CallableStatement` runs stored procedures.
+- Turn auto-commit off for multi-statement work, and roll back on failure.
+
+## Official documentation
+
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html) (the `java.sql` and `javax.sql` packages)
+- [PostgreSQL documentation](https://www.postgresql.org/docs/current/) (the database behind the examples)
+- [Spring Boot reference documentation](https://docs.spring.io/spring-boot/reference/index.html) (library: connection pool defaults and `JdbcTemplate`)
 
 **See also:** [JPA and Hibernate](jpa-hibernate.md), [Spring Data JPA](spring-data-jpa.md), [SQL Advanced and Transactions](../06-databases-sql/advanced-sql-transactions.md)

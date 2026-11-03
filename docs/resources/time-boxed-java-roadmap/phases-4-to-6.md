@@ -1,21 +1,21 @@
 # Phases 4 to 6: Spring, Security and Messaging
 
-This part covers weeks 15 to 49 of the plan. Phase 4 builds the Spring stack from the container up to REST APIs. Phase 5 adds security, testing, and caching. Phase 6 moves to messaging and microservices. Use the Spring Boot 3 line throughout, which needs Java 17 or later and the `jakarta.*` namespace.
+Weeks 15 to 49 of the plan are covered here. Phase 4 works up the Spring stack from the container to REST APIs, Phase 5 adds security, testing, and caching, and Phase 6 covers messaging and microservices. Stick with the Spring Boot 3 line throughout; it requires Java 17 or later and uses the `jakarta.*` namespace.
 
 ---
 
 ## Phase 4: Spring Framework and Boot (weeks 15-28)
 
-Phase 4 has two topics: Spring Core in two to three weeks, and Spring Boot in three to four weeks.
+Phase 4 is made of two topics: Spring Core, which takes two to three weeks, and Spring Boot, which takes three to four weeks.
 
 ### Topic 8: Spring Core (2-3 weeks)
 
-**Week 1: Inversion of control and dependency injection**
+**Week 1 focus: container basics and dependency injection**
 
-- The `ApplicationContext`, and the difference between `AnnotationConfigApplicationContext` and XML-based configuration.
-- Bean definitions and scopes: singleton (the default), prototype, request, and session.
-- Injection with constructors, setters, and `@Autowired`, `@Resource`, and `@Inject`. Constructor injection is the preferred style.
-- Circular dependencies. Since Spring Boot 2.6, circular references fail at startup by default. Refactor the design rather than enabling them.
+- The `ApplicationContext`, and how `AnnotationConfigApplicationContext` differs from XML configuration.
+- Bean scopes: singleton (the default), prototype, request, and session.
+- Injecting through constructors, setters, or the `@Autowired`, `@Resource`, and `@Inject` annotations. Constructors are the recommended choice.
+- Circular dependencies. From Spring Boot 2.6 onward, circular references stop startup by default. Restructure the design instead of turning the check off.
 
 ```java
 import org.springframework.stereotype.Service;
@@ -34,190 +34,190 @@ interface PaymentClient { }
 
 **Week 2: Stereotypes, configuration, and AOP**
 
-- `@Component`, `@Service`, `@Repository`, and `@Controller`. They are all components, and each one marks a layer.
-- `@Configuration` and `@Bean` methods, and component scanning.
-- Aspect-oriented programming with `@Aspect`, `@Pointcut`, and the advice types `@Before`, `@After`, and `@Around`.
-- Cross-cutting concerns such as logging, security checks, and transactions. Spring's proxies apply AOP to beans called through the container, so a call from inside the same class bypasses the advice.
+- `@Component`, `@Service`, `@Repository`, and `@Controller`. Each is a component, and each also labels its layer.
+- `@Configuration` classes with `@Bean` methods, plus component scanning.
+- Aspect-oriented programming using `@Aspect`, `@Pointcut`, and the advice kinds `@Before`, `@After`, and `@Around`.
+- Cross-cutting concerns like logging, security checks, and transactions. Spring applies AOP through proxies on beans that the container invokes, so a call made from within the same class skips the advice.
 
 **Week 3: Spring MVC and transactions**
 
-- The `DispatcherServlet`, handler mapping, and view resolution.
-- `@Controller`, `@RequestMapping`, interceptors, and servlet filters, and the order they run in.
-- `@Transactional`: propagation (`REQUIRED`, `REQUIRES_NEW`, `NESTED`), isolation levels, and rollback rules. By default, only unchecked exceptions roll back.
-- `TransactionTemplate` for programmatic transactions, and `PlatformTransactionManager` as the underlying abstraction.
+- The `DispatcherServlet`, along with handler mapping and view resolution.
+- `@Controller`, `@RequestMapping`, interceptors, and servlet filters, including the order in which each runs.
+- `@Transactional`: propagation modes (`REQUIRED`, `REQUIRES_NEW`, `NESTED`), isolation levels, and rollback rules. Out of the box, only unchecked exceptions trigger a rollback.
+- `TransactionTemplate` for transactions written in code, with `PlatformTransactionManager` underneath.
 
-**Interview tip:** explain why `@Transactional` on a method called from inside the same class does not start a transaction. The answer is the proxy, and the fix is to move the call through another bean or to use a different design.
+**Interview tip:** be ready to explain why a `@Transactional` method invoked from inside its own class starts no transaction. The cause is the proxy, and the fix is to route the call through another bean or to rethink the design.
 
 ### Topic 9: Spring Boot (3-4 weeks)
 
-**Week 1: Boot basics**
+**Week 1 focus: getting started with Boot**
 
-- `@SpringBootApplication`, which combines configuration, component scanning, and auto-configuration.
-- `application.properties` and `application.yml`, and how the two are merged.
-- Profiles for `dev`, `test`, and `prod`.
-- `@ConfigurationProperties` for typed configuration, and `@Value` for single values.
-- The embedded server (Tomcat by default) and the executable JAR.
+- `@SpringBootApplication`, a shortcut that bundles configuration, component scanning, and auto-configuration.
+- `application.properties` and `application.yml`, and how Boot merges them.
+- Profiles for `dev`, `test`, and `prod` environments.
+- `@ConfigurationProperties` for strongly typed settings, and `@Value` for one-off values.
+- The embedded server (Tomcat unless configured otherwise) and the runnable JAR.
 
 **Week 2: REST APIs**
 
-- `@RestController`, `@RequestMapping`, and the shortcut annotations `@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`, and `@PatchMapping`.
-- Binding with `@RequestBody`, `@PathVariable`, and `@RequestParam`.
-- `ResponseEntity` for setting the status code and headers.
-- Content negotiation between JSON and XML, and which formats the default setup supports.
+- `@RestController`, `@RequestMapping`, and the verb-specific shortcuts `@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`, and `@PatchMapping`.
+- Reading input through `@RequestBody`, `@PathVariable`, and `@RequestParam`.
+- `ResponseEntity` for controlling the status code and headers.
+- Content negotiation between JSON and XML, and the formats the default configuration handles.
 
 **Week 3: Validation, errors, and monitoring**
 
-- Jakarta Bean Validation, which was previously called JSR-303 and JSR-380. Use `@NotNull`, `@Email`, `@Pattern`, and `@Valid` on the request body.
-- `@ExceptionHandler` and `@RestControllerAdvice` for a single error-handling point.
-- Error responses in the RFC 9457 "Problem Details" format. RFC 9457 replaces RFC 7807.
-- Spring Boot Actuator endpoints such as `/actuator/health` and `/actuator/metrics`, and custom health indicators.
-- Micrometer as the metrics facade that Actuator uses.
+- Jakarta Bean Validation, formerly known as JSR-303 and JSR-380. Put `@NotNull`, `@Email`, `@Pattern`, and `@Valid` on the request body.
+- `@ExceptionHandler` and `@RestControllerAdvice` to centralize error handling.
+- Error bodies that follow RFC 9457 ("Problem Details"), which supersedes RFC 7807.
+- Actuator endpoints such as `/actuator/health` and `/actuator/metrics`, plus custom health indicators.
+- Micrometer, the metrics facade Actuator relies on.
 
 **Week 4: API documentation and testing**
 
-- OpenAPI documentation with the springdoc-openapi starter for Spring Boot 3, and annotations such as `@Operation`, `@ApiResponse`, and `@Parameter`.
-- Test slices: `@SpringBootTest` for the full context, `@WebMvcTest` for the web layer, and `@DataJpaTest` for the persistence layer.
-- `MockMvc` for controller tests, REST Assured for black-box API tests, and Testcontainers for real databases in Docker.
+- OpenAPI docs generated by the springdoc-openapi starter for Spring Boot 3, using annotations like `@Operation`, `@ApiResponse`, and `@Parameter`.
+- Test slices: `@SpringBootTest` loads the full context, `@WebMvcTest` covers the web layer, and `@DataJpaTest` covers persistence.
+- `MockMvc` for controller tests, REST Assured for black-box API checks, and Testcontainers to run real databases in Docker.
 
-**Project:** an e-commerce API with controllers, services, repositories, validation, error handling, Actuator, and OpenAPI documentation.
+**Project:** an e-commerce API built from controllers, services, and repositories, with validation, error handling, Actuator, and OpenAPI docs.
 
 ---
 
 ## Phase 5: Security, Testing and Caching (weeks 29-35)
 
-Phase 5 has three topics that take about seven weeks in total.
+Phase 5 spans three topics and roughly seven weeks.
 
 ### Topic 10: Security (2 weeks)
 
-**Week 1: authentication and authorization**
+**Week 1: identity and access control**
 
-- Spring Security basics: the `SecurityContext`, `UserDetails`, and `Authentication`.
-- The filter chain. Spring Security 6 configures a `SecurityFilterChain` bean. `WebSecurityConfigurerAdapter` was removed in Spring Security 6.
-- Role-based access control and method security with `@PreAuthorize` and `@PostAuthorize`. `@Secured` also works but is less flexible.
+- Core Spring Security types: `SecurityContext`, `UserDetails`, and `Authentication`.
+- The filter chain. In Spring Security 6 you declare a `SecurityFilterChain` bean; `WebSecurityConfigurerAdapter` no longer exists in that version.
+- Role-based access control, plus method-level checks via `@PreAuthorize` and `@PostAuthorize`. `@Secured` still functions but offers less flexibility.
 
 **Week 1 to 2: authentication mechanisms**
 
-- **JWT:** the three parts (header, payload, signature), how a server checks the signature, token expiry, and refresh tokens. A JWT is signed, not encrypted, so do not put secrets in its payload.
-- **OAuth 2.0:** the authorization code flow, access tokens, and refresh tokens.
-- **OpenID Connect:** an identity layer on top of OAuth 2.0 that adds ID tokens and a user-info endpoint.
-- **Multi-factor authentication:** what each factor proves, and where it is weakest.
+- **JWT:** its three parts (header, payload, signature), how the server verifies the signature, expiry, and refresh tokens. A JWT is signed rather than encrypted, so never store secrets in the payload.
+- **OAuth 2.0:** the authorization code flow, plus access and refresh tokens.
+- **OpenID Connect:** an identity layer built on OAuth 2.0 that introduces ID tokens and a user-info endpoint.
+- **Multi-factor authentication:** what each factor demonstrates, and which factor is the easiest to defeat.
 
 **Week 2: advanced security**
 
-- Password storage with an adaptive hash such as bcrypt or Argon2. A salt is stored with each hash. A pepper is a secret kept outside the database.
-- CORS and CSRF. CSRF protection matters most for cookie-based sessions. A stateless API that uses bearer tokens usually disables CSRF on purpose.
-- HTTPS and TLS: certificates, the handshake, and what a certificate chain proves.
-- The OWASP Top 10 and the prevention for each category.
-- Secrets management with environment variables, a secrets manager such as HashiCorp Vault, or a cloud provider's secret store.
+- Storing passwords with an adaptive hash like bcrypt or Argon2. Each hash carries its own salt. A pepper is a secret held somewhere other than the database.
+- CORS and CSRF. CSRF defenses count most for cookie-based sessions. A stateless API that relies on bearer tokens often turns CSRF protection off deliberately.
+- HTTPS and TLS: certificates, the handshake, and what a certificate chain establishes.
+- The OWASP Top 10 and how to prevent each category.
+- Managing secrets through environment variables, a vault product like HashiCorp Vault, or a cloud provider's secret service.
 
-**Projects:** a secure REST API that issues and checks JWTs, an OAuth 2.0 login with a public identity provider, and a multi-tenant application with role checks per tenant.
+**Projects:** a secured REST API that issues and validates JWTs, an OAuth 2.0 login using a public identity provider, and a multi-tenant app that checks roles for each tenant.
 
 ### Topic 11: Testing (1-2 weeks)
 
 **Unit tests**
 
-- JUnit 5 (Jupiter): `@Test`, `@BeforeEach`, `@AfterEach`, and `@ParameterizedTest` for data-driven cases.
-- Assertions and matchers. AssertJ gives more readable failure messages than the JUnit assertions.
+- JUnit 5 (Jupiter): `@Test`, `@BeforeEach`, `@AfterEach`, and `@ParameterizedTest` for running one test over many inputs.
+- Assertions and matchers. AssertJ produces clearer failure output than plain JUnit assertions.
 
 **Mocking**
 
-- Mockito: `@Mock`, `@InjectMocks`, and `@Spy`.
-- Stubbing with `when(...).thenReturn(...)`, argument captors, and verification with `verify`.
-- Mock the collaborators of the class under test, not the class itself.
+- Mockito annotations: `@Mock`, `@InjectMocks`, and `@Spy`.
+- Stubbing via `when(...).thenReturn(...)`, capturing arguments, and checking calls with `verify`.
+- Mock the dependencies of the class under test, never the class itself.
 
 **Integration tests**
 
-- `@SpringBootTest` and the test context cache. A changed configuration creates a new context, which is slow.
-- Testcontainers for real databases and message brokers in Docker.
-- `@DirtiesContext` when a test changes shared state that the cache cannot reset.
+- `@SpringBootTest` along with the test context cache. Each configuration change spins up a fresh context, and that costs time.
+- Testcontainers for real databases and message brokers running in Docker.
+- `@DirtiesContext` for tests that modify shared state the cache cannot restore.
 
 **API tests**
 
 - `MockMvc`: `perform()`, `andExpect()`, and `andReturn()`.
-- REST Assured: `given().when().then()` for calls to a running service.
-- Contract testing with Spring Cloud Contract, to check that a provider and its consumers agree on a request and response format.
+- REST Assured: `given().when().then()` chains for hitting a live service.
+- Contract tests with Spring Cloud Contract, confirming that a provider and its consumers share the same request and response shape.
 
 **Coverage**
 
-- JaCoCo for line and branch coverage reports.
-- SonarQube for coverage together with code-quality rules.
-- Coverage shows what ran, not whether the assertions were useful. Look at tests that assert nothing.
+- JaCoCo reports on line and branch coverage.
+- SonarQube, which combines coverage with code-quality rules.
+- Coverage tells you what executed, not whether the checks mean anything. Watch for tests that never assert.
 
 ### Topic 12: Caching and Performance (1-2 weeks)
 
 **Spring Cache abstraction**
 
-- `@Cacheable`, `@CachePut`, `@CacheEvict`, and `@Caching` to combine them.
-- Cache managers and key generation. Caching is applied through the proxy, so the same self-invocation caveat applies as with `@Transactional`.
-- Conditional caching with `condition` and `unless`.
+- Annotations: `@Cacheable`, `@CachePut`, `@CacheEvict`, plus `@Caching` for grouping them.
+- Cache managers and key generation. Caching also runs through a proxy, so a self-call has the same blind spot it has with `@Transactional`.
+- Conditional caching driven by `condition` and `unless`.
 
 **Redis**
 
-- Data types: strings, lists, sets, hashes, and sorted sets.
-- Spring Data Redis and `RedisTemplate`.
-- Session storage with Spring Session backed by Redis.
-- Distributed locks and Pub/Sub. A lock needs a timeout and a safe release.
+- Data types: strings, lists, sets, hashes, sorted sets.
+- `RedisTemplate` and Spring Data Redis.
+- Storing sessions in Redis through Spring Session.
+- Distributed locks and Pub/Sub. A lock must expire on a timeout and be released safely.
 
 **Performance**
 
 - Profiling with VisualVM, JProfiler, or async-profiler.
-- Database problems such as the N+1 query pattern, and how to fix it with fetch joins or entity graphs.
-- JVM tuning and connection pool sizing. A larger pool is not always faster.
-- Load testing with JMeter or Gatling.
+- Database issues like the N+1 query problem, with fetch joins or entity graphs as the remedy.
+- JVM tuning and sizing the connection pool. Bigger pools do not automatically perform better.
+- Load tests with JMeter or Gatling.
 
 ---
 
 ## Phase 6: Messaging and Microservices (weeks 36-49)
 
-Phase 6 has two topics: messaging in one to two weeks, and microservices in three to four weeks.
+Phase 6 has two topics: messaging, which takes one to two weeks, and microservices, which takes three to four weeks.
 
 ### Topic 13: Messaging and Event-Driven Design (1-2 weeks)
 
-**Apache Kafka (3-4 days)**
+**Kafka (3-4 days)**
 
-- Architecture: brokers, topics, partitions, and replicas.
-- Producers: serialization, partition keys, and acknowledgment settings (`acks`).
-- Consumers: consumer groups, offsets, and rebalancing.
-- Three delivery guarantees: at most once, at least once, and exactly once. Exactly-once in Kafka applies to Kafka-to-Kafka processing. A side effect in a database still needs an idempotent write.
-- Spring Kafka: `KafkaTemplate` for sending and `@KafkaListener` for receiving.
-- Error handling with retries and a dead-letter topic.
+- How it is built: brokers, topics, partitions, replicas.
+- Producers: serializing messages, choosing partition keys, and the `acks` setting.
+- Consumers: consumer groups, offsets, and partition rebalancing.
+- The three delivery levels: at most once, at least once, and exactly once. Exactly-once semantics in Kafka covers Kafka-to-Kafka work only. A database side effect still calls for an idempotent write.
+- Spring Kafka: `KafkaTemplate` to send, `@KafkaListener` to receive.
+- Handling failures with retries and a dead-letter topic.
 
 **RabbitMQ (2-3 days)**
 
-- The AMQP model: exchanges, queues, and bindings.
-- Exchange types: direct, topic, fanout, and headers.
-- Spring AMQP for sending and listening.
-- Message TTL and manual or automatic acknowledgments.
+- The AMQP model of exchanges, queues, and bindings.
+- Exchange kinds: direct, topic, fanout, headers.
+- Spring AMQP for publishing and consuming.
+- Message time-to-live (TTL) and manual versus automatic acknowledgments.
 
 **Event-driven patterns (2-3 days)**
 
-- Event sourcing: an append-only event store and rebuilding state by replaying events.
-- CQRS: separating the write model from the read model.
-- The saga pattern, in two styles. In choreography, services react to each other's events. In orchestration, a coordinator tells each service what to do.
-- Eventual consistency, and how to show it to users.
+- Event sourcing: an append-only log of events, with current state rebuilt by replaying them.
+- CQRS: keeping the write model and the read model apart.
+- The saga pattern comes in two styles. With choreography, services respond to one another's events. With orchestration, a central coordinator directs each service.
+- Eventual consistency and ways to present it to users.
 
 ### Topic 14: Microservices (3-4 weeks)
 
-**Week 1: fundamentals**
+**Week 1 focus: foundations**
 
-- Decomposing a system by bounded context from domain-driven design.
-- A database per service, and why shared tables couple services.
-- Trade-offs between a monolith and microservices. A monolith is often the right first choice for a small team.
+- Splitting a system along bounded contexts from domain-driven design.
+- One database per service, and why shared tables tie services together.
+- The trade-offs of monoliths versus microservices. For a small team, a monolith is frequently the better starting point.
 
 **Week 2: Spring Cloud and the platform around it**
 
-- **Service discovery:** Eureka, Consul, and etcd. Kubernetes DNS is an alternative when the services run in Kubernetes.
+- **Service discovery:** Eureka, Consul, and etcd. When services run on Kubernetes, its built-in DNS can take that role.
 - **Client-side load balancing:** Spring Cloud LoadBalancer.
-- **Configuration:** Spring Cloud Config Server, usually backed by a Git repository.
-- **API gateway:** Spring Cloud Gateway for routing and filtering.
-- **Distributed tracing:** Micrometer Tracing, with Zipkin or Jaeger as the backend. Spring Cloud Sleuth is no longer the current choice; Micrometer Tracing replaced it.
+- **Configuration:** Spring Cloud Config Server, typically storing settings in a Git repository.
+- **API gateway:** Spring Cloud Gateway handling routing and filters.
+- **Distributed tracing:** Micrometer Tracing, with Zipkin or Jaeger behind it. Spring Cloud Sleuth has been superseded, and Micrometer Tracing is its replacement.
 
 **Week 3: resilience patterns**
 
-- **Circuit breaker:** closed, open, and half-open states. Use Resilience4j. Netflix Hystrix is retired.
-- **Retry:** exponential backoff with a limit. Retry only operations that are safe to repeat.
-- **Timeouts:** every remote call needs one, and a deadline can be passed along the call chain.
-- **Bulkheads:** separate thread pools or semaphores so that one slow dependency cannot exhaust the others.
+- **Circuit breaker:** the closed, open, and half-open states. Choose Resilience4j, since Netflix Hystrix has been retired.
+- **Retry:** exponential backoff capped at a maximum attempt count. Only retry operations that can safely run again.
+- **Timeouts:** each remote call needs one, and a deadline can travel down the call chain.
+- **Bulkheads:** separate thread pools or semaphores, so a sluggish dependency cannot drain resources meant for the rest.
 - **Rate limiting:** token bucket and sliding window algorithms.
 
 ```java
@@ -237,20 +237,20 @@ Supplier<String> guarded = CircuitBreaker.decorateSupplier(breaker, () -> "ok");
 
 **Week 4: advanced topics**
 
-- Inter-service communication: REST, gRPC, and GraphQL, and when each one fits.
-- Service-to-service authentication with mTLS or with JWTs passed along the call chain.
-- Distributed transactions with sagas and compensating actions. Two-phase commit is rarely practical across services.
-- Monitoring and observability with the ELK stack or the Elastic stack, Prometheus, and Grafana.
+- Service-to-service communication with REST, gRPC, or GraphQL, and the cases each suits.
+- Authenticating calls between services using mTLS, or JWTs forwarded along the chain.
+- Distributed transactions built from sagas and compensating actions. Two-phase commit seldom works well across services.
+- Monitoring and observability with the Elastic stack (ELK), Prometheus, and Grafana.
 
-**Project:** three small services with a gateway, service discovery, a Kafka topic between two of them, and a circuit breaker on one remote call.
+**Project:** three small services, featuring a gateway, service discovery, a Kafka topic linking two of them, and a circuit breaker around one remote call.
 
 ---
 
 ## Phase 4 to 6 Deliverables
 
-- An e-commerce REST API with validation, error responses, Actuator, and OpenAPI documentation.
-- A secured API with JWT or OAuth 2.0, and tests at the unit, slice, and integration levels.
-- A caching layer in Redis, with one measured performance improvement.
-- Three services that talk through a broker, with a resilience policy on one remote call.
+- An e-commerce REST API with validation, error responses, Actuator, and OpenAPI docs.
+- A secured API using JWT or OAuth 2.0, with tests at unit, slice, and integration levels.
+- A Redis caching layer, with one performance gain you have measured.
+- Three services communicating through a broker, with a resilience policy on one remote call.
 
 **See also:** [Phases 1 to 3](phases-1-to-3.md), [Phases 7 to 9](phases-7-to-9.md), [Spring interview questions](../../interview-questions/technical/spring-and-security-part-1.md), [Microservices interview questions](../../interview-questions/technical/architecture-and-distributed.md)

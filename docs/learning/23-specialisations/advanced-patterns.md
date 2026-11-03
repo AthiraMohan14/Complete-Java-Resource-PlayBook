@@ -1,16 +1,23 @@
 # Advanced Patterns
 
-These patterns appear when a system spans several services, stores, or machines and a single database transaction is no longer enough. Interviewers ask about them to see whether you understand consistency trade-offs, failure handling across services, and when a pattern is worth its complexity.
+!!! note "In simple words"
+    When one piece of work spans several services or stores, one database transaction is no longer enough. These patterns describe how to record what happened, split work into steps, and undo steps that cannot finish.
 
-## Core concepts
+These patterns appear when a system spans several services, data stores, or machines. Interviewers ask about them to check that you understand consistency trade-offs, failure handling across services, and when a pattern is worth its complexity.
+
+## Why it matters
+
+A single database transaction is simple: either every change commits or none does. Once an order touches a payment provider, a warehouse, and an email service, no single transaction can cover all three. Teams then face questions. What happens if the payment succeeds and the stock check fails? How do you rebuild a screen that reads from several sources? How do you know what happened last week? The patterns in this page give answers, each with a cost.
+
+## How it works
 
 ### Event sourcing
 
-In **event sourcing**, you store the sequence of events that happened to an entity, not just its current state. The current state is derived by replaying the events. An account is "opened, deposited 50, withdrew 20", not "balance 30".
+In **event sourcing**, the system stores the sequence of events that happened to an entity, rather than only its current state. The current state is rebuilt by replaying the events in order. An account is described as "opened, deposited 50, withdrew 20", not as "balance 30".
 
-Benefits: a full audit trail, the ability to rebuild state or compute new views from history, and a natural fit for asynchronous integration. Costs: more complex queries, event schema evolution, and the need for snapshots when replay gets long.
+Benefits: a full audit trail, the ability to rebuild state or build new views from history, and a natural fit for asynchronous integration. Costs: queries are harder, event schemas must evolve carefully, and long histories need snapshots so that replay stays fast.
 
-Java 21 makes the event model concise. A sealed interface lists the allowed events, and an exhaustive switch folds them into state:
+Java 21 makes the model concise. A sealed interface lists the allowed events, and a `switch` folds each event into the state. The compiler checks that every event is handled:
 
 ```java
 import java.math.BigDecimal;
@@ -45,29 +52,36 @@ public class AccountEvents {
         }
         return account;
     }
+
+    public static void main(String[] args) {
+        Account account = replay(List.of(
+                new Deposited("acc-1", new BigDecimal("50")),
+                new Withdrawn("acc-1", new BigDecimal("20"))));
+        System.out.println(account.balance());   // 30
+    }
 }
 ```
 
-The compiler checks that the switch covers every permitted event, so adding a new event type produces a compile error wherever you have not handled it.
+If someone adds a new event type to `permits`, every `switch` that does not handle it fails to compile. That is the main safety benefit.
 
 ### CQRS
 
-**Command Query Responsibility Segregation (CQRS)** separates the write model (commands that change state and enforce rules) from the read model (queries shaped for screens and reports). The two can use different stores and different schemas. Events published by the write side update one or more read models, called projections.
+**Command Query Responsibility Segregation** (CQRS) separates the write model from the read model. The write side accepts commands and enforces the rules. The read side serves queries shaped for screens and reports. The two can use different stores and different schemas. Events from the write side update one or more read models, which are called projections.
 
-Because projections are updated asynchronously, reads can lag behind writes. That is **eventual consistency**. Design the user experience for it: show "processing" states, or read your own write from the command response.
+Projections are updated asynchronously, so a read can lag behind a write. That is **eventual consistency**. Design the user experience for it: show a "processing" state, or return the new data in the response to the command.
 
-CQRS and event sourcing are often used together, but neither requires the other. CQRS alone can be useful when read and write loads differ greatly.
+CQRS and event sourcing often appear together, but neither needs the other. CQRS alone helps when reads and writes have very different shapes or loads.
 
-### Distributed sagas
+### Sagas
 
-A **saga** coordinates a business transaction across several services, where each step commits locally and no distributed lock or two-phase commit is used. If a later step fails, earlier steps are undone by **compensating actions** (refund a payment, release reserved stock).
+A **saga** coordinates one business transaction across several services. Each step commits its own local change, and no distributed lock or two-phase commit is used. If a later step fails, the completed steps are undone by **compensating actions**, such as refunding a payment or releasing reserved stock.
 
-Two styles:
+There are two styles:
 
-- **Choreography:** each service listens for events and reacts. Simple for short flows; hard to see the whole flow and to change it.
-- **Orchestration:** a coordinator tells each service what to do next and handles failures. Clearer flow and easier to monitor; the coordinator is an extra component to run.
+- **Choreography**: each service listens for events and reacts. It is simple for short flows, but the overall flow is hard to see and hard to change.
+- **Orchestration**: a coordinator tells each service what to do next, and handles failures. The flow is clearer and easier to monitor, but the coordinator is one more component to run.
 
-A minimal in-memory orchestrator shows the compensation logic. Production sagas persist their state, so a restart can resume or compensate:
+The class below is an in-memory orchestrator. It runs the steps in order. When a step fails, it runs the compensations of the completed steps in reverse order. Production sagas must persist their progress, so that a restart can resume or compensate:
 
 ```java
 import java.util.ArrayDeque;
@@ -93,61 +107,123 @@ public final class OrderSaga {
                 completed.push(step);
             }
         } catch (RuntimeException failure) {
-            // Undo completed steps in reverse order
-            while (!completed.isEmpty()) {
+            while (!completed.isEmpty()) {       // undo the most recent completed step first
                 completed.pop().compensate();
             }
             throw failure;
         }
     }
+
+    public static void main(String[] args) {
+        Step charge = new Step() {
+            public void execute() { System.out.println("charge card"); }
+            public void compensate() { System.out.println("refund card"); }
+        };
+        Step reserve = new Step() {
+            public void execute() { throw new IllegalStateException("no stock"); }
+            public void compensate() { System.out.println("release stock"); }
+        };
+        try {
+            run(List.of(charge, reserve));
+        } catch (IllegalStateException e) {
+            System.out.println("saga failed: " + e.getMessage());
+        }
+    }
 }
 ```
 
-Compensations can fail too. Make them idempotent, retry them with backoff, and alert when one cannot complete. Some actions cannot be undone (an email sent), so model them as steps that come last or that have compensating messages instead.
+Running `main` prints the charge, then the refund, then the failure message. The reservation never completed, so its compensation does not run.
+
+Compensations can fail as well. Make them idempotent, retry them with backoff, and raise an alert when one cannot finish. Some actions cannot be undone, such as an email that has already been sent. Place those steps last, or model them with a compensating message, such as a correction email.
 
 ### Workflow engines: Temporal
 
-A **workflow engine** runs long-lived business processes durably. **Temporal** lets you write the workflow as ordinary code. The engine persists each step's progress, so a workflow survives process restarts and resumes where it stopped. Retries, timers, and timeouts are part of the platform. Activities (the side-effecting steps) must still be idempotent, because retries can repeat them.
+A **workflow engine** runs long-lived business processes durably. **Temporal** lets you write a workflow as ordinary code. The engine persists the progress of each step, so the workflow survives restarts and resumes where it stopped. Retries, timers, and timeouts are part of the platform. Activities, which are the steps with side effects, must still be idempotent, because the engine may retry them.
 
-Temporal suits sagas, multi-day approvals, and scheduled processes. For a simple two-step flow, a queue and a database table may be enough.
+Temporal suits sagas, approvals that take days, and scheduled processes. For a simple two-step flow, a queue and a database table are often enough. The [Temporal documentation](https://docs.temporal.io/) covers workflows, activities, and retry policies.
 
 ### Stream processing: Kafka Streams and Apache Flink
 
 **Stream processing** computes results continuously over an unbounded sequence of events.
 
-- **Kafka Streams** is a Java library. You write a topology of operators (filter, map, join, aggregate) that runs inside your application and reads from and writes to Kafka topics. It is a good fit when the data lives in Kafka and you want a library rather than a cluster.
-- **Apache Flink** is a distributed processing engine with its own cluster. It handles large-scale stateful processing, event-time windows, and checkpointing.
+- **Kafka Streams** is a Java library. You write a topology of operators, such as filter, map, join, and aggregate. The topology runs inside your application and reads from and writes to Kafka topics. It suits data that already lives in Kafka, when you want a library rather than a cluster.
+- **Apache Flink** is a distributed processing engine with its own cluster. It handles large, stateful pipelines, event-time windows, and checkpointing.
 
-The core concepts are windows (tumbling, sliding, session), event time versus processing time, watermarks for late data, and state stored for each key. Choose Kafka Streams for application-embedded processing and Flink for larger, more complex pipelines.
+The core concepts are windows (tumbling, sliding, and session), event time versus processing time, watermarks for late data, and state kept per key. Choose Kafka Streams for processing embedded in an application, and Flink for larger or more complex pipelines. The [Apache Flink documentation](https://nightlies.apache.org/flink/flink-docs-stable/) is the reference for its APIs.
 
-## How it works
+```mermaid
+flowchart LR
+    Cmd[Command] --> Agg[Aggregate validates and emits events]
+    Agg --> Log[Event log]
+    Log --> Proj[Projection updates read model]
+    Proj --> Read[Queries read model]
+    Agg --> Saga[Saga coordinator]
+    Saga --> Step1[Local step]
+    Step1 -- failure --> Comp[Compensate in reverse order]
+```
 
-1. An event-sourced aggregate stores events; its state is rebuilt by folding them.
-2. Commands are validated against current state and produce new events.
-3. Projections subscribe to events and update read models asynchronously.
-4. A saga runs steps across services; on failure, compensations run in reverse order.
-5. A stream processor consumes events, keeps per-key state, and emits derived events or results.
+The diagram is a mental model rather than a single system. Commands produce events, projections read them, and a saga coordinates steps across services.
+
+## Where it is used
+
+- Payment flows that involve an external provider, an inventory service, and a notification service.
+- Order fulfilment, where shipping is a long-running process.
+- Banking ledgers and audit trails, where history must be complete.
+- Dashboards and search views built from events.
+- Real-time metrics and fraud signals computed over streams of transactions.
+
+## Benefits
+
+- Event sourcing gives an audit trail and the ability to build new views from history.
+- CQRS lets reads and writes scale and evolve separately.
+- Sagas let services stay independent, with no shared database transaction.
+- Workflow engines keep long processes correct across restarts.
+- Stream processors compute results continuously, with state that survives failures.
+
+## Cons and limits
+
+- Event sourcing adds cost for simple data that needs no history.
+- Event schemas must be versioned, or replay breaks.
+- Read models lag behind writes, so users may see old data for a moment.
+- Compensations are not always exact undo. A refund is not the same as a payment that never happened.
+- Stream processing must handle late and out-of-order events, and that adds complexity.
+
+## Best practices
+
+- Use event sourcing only where the history matters, and keep the event schemas versioned.
+- Design the user interface for eventual consistency, and show processing states.
+- Make every saga step and every compensation idempotent, and persist the saga state.
+- Use orchestration for long flows that need visibility, and choreography for short ones.
+- Set retry limits and alerts for compensations that cannot finish.
+- Test late and duplicate events in stream pipelines, not only the happy path.
 
 ## Common pitfalls
 
-- Using event sourcing for simple CRUD where it adds cost without value
-- Changing event schemas without versioning, which breaks replay
-- Expecting read models to be up to date immediately after a write
-- Sagas with non-idempotent compensations, or no plan for a compensation that fails
-- Choosing choreography for long flows that need visibility
-- Using distributed transactions to avoid eventual consistency, which often costs more than it saves
-- Ignoring late and out-of-order events in stream processing
+- Using event sourcing for simple create, read, update, and delete data.
+- Changing event shapes without versioning, which breaks replay.
+- Expecting a read model to reflect a write immediately.
+- Writing sagas whose compensations are not idempotent, or with no plan for a failed compensation.
+- Picking choreography for a long flow that needs clear tracking.
+- Using distributed transactions to avoid eventual consistency, which often costs more than it saves.
+- Ignoring late and out-of-order events in stream processing.
 
 !!! tip "Interview tip"
-    **Q: How do you handle a payment that succeeds but a later stock reservation fails?**
-    A: Use a saga. The reservation step fails, so the saga runs the compensation for the payment (a refund or void), in reverse order. Each step and compensation is idempotent and persisted, so the saga can resume after a crash. The customer sees an order that failed cleanly, not a partial state.
+    **Q: How do you handle a payment that succeeds when a later stock reservation fails?**
+    Use a saga. The reservation step fails, so the saga runs the payment's compensation, a refund or a void, in reverse order. Each step and each compensation is idempotent and its progress is persisted, so the saga can resume after a crash. The customer sees an order that failed cleanly, not a partial state.
 
 ## Quick recap
 
-- Event sourcing stores history and rebuilds state by replay; use sealed types and exhaustive switches
-- CQRS separates reads and writes; projections are eventually consistent
-- Sagas replace distributed transactions with local steps and compensations
-- Workflow engines like Temporal persist long-running processes
-- Kafka Streams is embedded; Flink is a distributed engine; both handle stateful stream processing
+- Event sourcing stores history and rebuilds state by replaying it. Sealed types and exhaustive switches keep the handling complete.
+- CQRS separates reads and writes. Projections are eventually consistent.
+- Sagas replace distributed transactions with local steps and compensations.
+- Workflow engines such as Temporal persist long-running processes.
+- Kafka Streams runs embedded in an application. Flink is a distributed engine. Both handle stateful stream processing.
 
-**See also:** [Search and Analytics](search-analytics.md), [Machine Learning for Backend Engineers](ml-for-backend-engineers.md), [Distributed Tracing](../20-observability/distributed-tracing.md)
+## Official documentation
+
+- [Apache Kafka documentation](https://kafka.apache.org/documentation/)
+- [Temporal documentation](https://docs.temporal.io/)
+- [Apache Flink documentation](https://nightlies.apache.org/flink/flink-docs-stable/)
+- [Java 21 java.util.concurrent package](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html)
+
+**See also:** [Search and Analytics](search-analytics.md) | [Machine Learning for Backend Engineers](ml-for-backend-engineers.md) | [Distributed Transactions](../14-microservices/distributed-transactions.md) | [Distributed Tracing](../20-observability/distributed-tracing.md)

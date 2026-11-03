@@ -12,8 +12,8 @@ A field that is never reassigned should be `final`. This documents intent, preve
 
 ```java
 public class Greeter {
-    private final String greeting = "Hello";  // never reassigned
-    private String lastName;                  // changed by a setter, so not final
+    private final String greeting = "Hello";  // never reassigned ✅ Good
+    private String lastName;                  // changed by a setter, so not final ⚠️ Only if needed
 
     public void setLastName(String name) {
         this.lastName = name;

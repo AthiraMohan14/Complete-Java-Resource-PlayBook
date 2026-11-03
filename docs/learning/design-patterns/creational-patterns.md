@@ -1,12 +1,29 @@
 # Creational Design Patterns
 
-Creational patterns control how objects get created. Interviewers ask about them to see whether you can separate "who needs the object" from "how the object is built", and whether you know the cost of each choice.
+Creational patterns control how objects are created. Interviewers ask about them to see whether you can separate "who needs the object" from "how the object is built", and whether you understand the cost of each choice.
 
-## Core concepts
+!!! note "In simple words"
+    Creational patterns are ways to make objects without the code that uses them having to know the messy details. The caller asks for "a logger" or "a config" and gets one, built the right way.
+
+## Why it matters
+
+Object creation is spread through a program. If every class calls `new` on a concrete type, changing that type means editing many files, and tests cannot swap in a fake. Creational patterns move the choice of concrete type into one place. They also solve practical problems, such as building an object with many optional settings or making sure only one shared object exists.
+
+## How it works
+
+### The five patterns at a glance
+
+| Pattern | Problem it solves | Key mechanism |
+|---------|-------------------|---------------|
+| Singleton | Exactly one shared instance is needed | Private constructor and one static access point |
+| Factory Method | A subclass should decide which product to create | Overridden creation method |
+| Abstract Factory | Related products must match each other | A factory per product family |
+| Prototype | Copying is cheaper than building from scratch | A copy operation on the object |
+| Builder | Many optional parts, or validation before creation | A step-by-step builder that ends in `build()` |
 
 ### Singleton
 
-A singleton guarantees one instance of a class in a JVM and gives code a single way to reach it. Use it for things that really are one-per-application, such as a configuration holder or a registry of metrics.
+A singleton guarantees one instance of a class in a JVM and gives code a single way to reach it. Use it for things that really are one per application, such as a configuration holder or a registry of metrics.
 
 The simplest lazy version is not safe under concurrency. Two threads can both see `null` and both create an instance. Two thread-safe options are common.
 
@@ -26,7 +43,7 @@ public final class ConfigHolder {
     }
 }
 
-// Option 2: enum (serialization-safe and reflection-resistant)
+// Option 2: enum (serialization-safe and resistant to reflection)
 public enum AppMode {
     INSTANCE;
 
@@ -61,9 +78,22 @@ public final class Registry {
 }
 ```
 
+```mermaid
+classDiagram
+    class ConfigHolder {
+        -ConfigHolder()
+        +getInstance() ConfigHolder
+    }
+    class Holder {
+        <<nested>>
+        +INSTANCE ConfigHolder
+    }
+    ConfigHolder ..> Holder : lazy init
+```
+
 ### Factory Method
 
-A factory method is a method that creates an object, and subclasses decide which concrete type to return. The caller works against an interface and never names the concrete class.
+A factory method creates an object, and subclasses decide which concrete type to return. The caller works against an interface and never names the concrete class. The sample below compiles with Java 21 as a single file:
 
 ```java
 interface LogSink {
@@ -102,11 +132,37 @@ class JsonSinkCreator extends SinkCreator {
 }
 ```
 
-A static method that switches on a string is sometimes called a "simple factory". It is not a GoF pattern, but it is common and often enough. It becomes a problem when every new type means editing the same `switch`, which breaks the open/closed principle.
+```mermaid
+classDiagram
+    class LogSink {
+        <<interface>>
+        +write(line String) void
+    }
+    class ConsoleSink {
+        +write(line String) void
+    }
+    class JsonConsoleSink {
+        +write(line String) void
+    }
+    class SinkCreator {
+        <<abstract>>
+        +createSink() LogSink
+        +log(line String) void
+    }
+    class JsonSinkCreator {
+        +createSink() LogSink
+    }
+    LogSink <|.. ConsoleSink
+    LogSink <|.. JsonConsoleSink
+    SinkCreator <|-- JsonSinkCreator
+    SinkCreator ..> LogSink : creates
+```
+
+A static method that switches on a string is sometimes called a simple factory. It is not a Gang of Four pattern, but it is common and often good enough. It becomes a problem when every new type means editing the same `switch`, which breaks the open/closed principle.
 
 ### Abstract Factory
 
-An abstract factory creates a family of related objects that must be used together. The client picks one factory and gets consistent products from it. A database dialect is a typical case: a PostgreSQL factory must return PostgreSQL-style ID generators and query builders, never a mix of dialects.
+An abstract factory creates a family of related objects that must be used together. The client picks one factory and gets consistent products from it. A database dialect is a typical case: a PostgreSQL factory must return PostgreSQL-style ID generators and query builders, never a mix of dialects. The sample below compiles with Java 21:
 
 ```java
 interface IdGenerator {
@@ -149,13 +205,37 @@ class PostgresDialectFactory implements DialectFactory {
 }
 ```
 
-A MySQL factory would be built the same way, quoting identifiers with backticks instead. Adding a new product type (for example, a menu) forces a change to every factory. That is the trade-off: easy to add a family, harder to add a new kind of member.
+```mermaid
+classDiagram
+    class DialectFactory {
+        <<interface>>
+        +createIdGenerator() IdGenerator
+        +createQueryBuilder() QueryBuilder
+    }
+    class PostgresDialectFactory {
+        +createIdGenerator() IdGenerator
+        +createQueryBuilder() QueryBuilder
+    }
+    class IdGenerator {
+        <<interface>>
+        +nextId() String
+    }
+    class QueryBuilder {
+        <<interface>>
+        +selectAll(table String) String
+    }
+    DialectFactory <|.. PostgresDialectFactory
+    PostgresDialectFactory ..> IdGenerator : creates
+    PostgresDialectFactory ..> QueryBuilder : creates
+```
+
+A MySQL factory would be built the same way, but it would quote identifiers with backticks. Adding a new kind of product, such as a menu, forces a change to every factory. That is the trade-off: a new family is easy to add, but a new kind of member is harder to add.
 
 ### Prototype
 
-A prototype creates new objects by copying an existing one. It helps when building an object from scratch is expensive, or when the caller only has an existing object and wants a similar one.
+A prototype creates new objects by copying an existing one. It helps when building an object from scratch is expensive, or when the caller already holds an object and wants a similar one.
 
-In Java, `Object.clone()` and `Cloneable` are error-prone. `clone()` makes a shallow copy by default, and the checked `CloneNotSupportedException` is awkward. A copy constructor or a static `copy()` method is usually clearer.
+In Java, `Object.clone()` and `Cloneable` are error-prone. `clone()` makes a shallow copy by default, and its checked `CloneNotSupportedException` is awkward. A copy constructor or a static `copy()` method is usually clearer.
 
 ```java
 import java.util.ArrayList;
@@ -195,11 +275,13 @@ class Template {
 }
 ```
 
+The copy constructor copies the list, so adding a section to the copy leaves the original unchanged. If the list were shared, both objects would change together.
+
 ### Builder
 
-A builder collects the parts of an object step by step and creates the final object in one call, usually `build()`. It fixes the "telescoping constructor" problem, where a class has five constructors with overlapping parameter lists and callers cannot tell which `int` is which.
+A builder collects the parts of an object step by step, then creates the final object in one call, usually `build()`. It fixes the telescoping constructor problem, where a class has five constructors with overlapping parameter lists and callers cannot tell which `int` is which.
 
-Builders are a good fit for classes with several optional settings, for immutable objects, and for objects that need validation before they exist.
+Builders suit classes with several optional settings, immutable objects, and objects that must be validated before they exist. The sample below compiles with Java 21:
 
 ```java
 public final class ServerConfig {
@@ -258,35 +340,92 @@ public final class ServerConfig {
 }
 ```
 
-Java records cover many data-only cases with less code. A builder is still useful when there are optional fields, validation rules, or a need for defaults.
+```mermaid
+classDiagram
+    class ServerConfig {
+        -String host
+        -int port
+        -boolean tls
+        +builder(host String) Builder
+    }
+    class Builder {
+        +port(port int) Builder
+        +tls(tls boolean) Builder
+        +build() ServerConfig
+    }
+    ServerConfig *-- Builder : nested
+    Builder ..> ServerConfig : builds
+```
 
-Lombok's `@Builder` generates this boilerplate. Its generated code follows the same pattern, so knowing the hand-written version helps when you debug generated code.
+Java records cover many data-only cases with less code. A builder is still useful when there are optional fields, validation rules, or defaults. Lombok's `@Builder` generates this boilerplate, and its generated code follows the same pattern. Knowing the hand-written version helps when you debug generated code.
 
-## How it works / Step by step
+### Step by step
 
 | Step | Singleton | Factory Method | Abstract Factory | Prototype | Builder |
 |------|-----------|----------------|------------------|-----------|---------|
 | 1 | Make the constructor private | Declare a creator with a factory method | Declare an interface for each product | Declare a copy operation | Declare the product and its optional fields |
 | 2 | Expose one static access point | Subclasses override the method | Implement a factory per family | Implement the copy | Add setter-like methods that return the builder |
-| 3 | Create the instance once | Client calls the creator | Client picks one factory | Client copies instead of constructing | Client calls `build()` |
+| 3 | Create the instance once | The client calls the creator | The client picks one factory | The client copies instead of constructing | The client calls `build()` |
 
-## Common pitfalls
+```mermaid
+flowchart LR
+    A[Caller needs an object] --> B{How many}
+    B -->|exactly one| C[Singleton]
+    B -->|one of several kinds| D[Factory Method]
+    B -->|a matched family| E[Abstract Factory]
+    B -->|a similar copy| F[Prototype]
+    B -->|many optional parts| G[Builder]
+```
 
-- **Singleton as a global variable.** A singleton hides dependencies, so tests cannot swap it out. In Spring, prefer a bean that the container manages, since beans are singleton-scoped by default and can be injected.
-- **Serialization breaks a naive singleton.** Deserialization can create a second instance unless you implement `readResolve()`. An enum avoids this.
-- **Shallow copies in prototypes.** A copy that shares a mutable list with the original causes bugs that appear only after one object is changed.
-- **Builders that accept invalid state.** Validate in `build()`, not in each setter, so the object is checked once with all values known.
-- **Abstract factories for one product.** If you only ever create one kind of object, a plain factory method is enough.
+## Where it is used
+
+- Logging frameworks create appenders and sinks through factories chosen by configuration.
+- JDBC drivers and connection factories hide the vendor-specific classes behind a common interface.
+- `Calendar.getInstance()` and `NumberFormat.getInstance()` are factory methods in the JDK.
+- `StringBuilder` and `HttpRequest.newBuilder()` in the JDK use the builder style.
+- Spring beans are singletons by default, managed by the container rather than by static fields.
+
+## Benefits
+
+- Callers depend on interfaces, so the concrete type can change without touching them.
+- Families of related objects stay consistent, which prevents subtle mixing bugs.
+- Builders make call sites readable and let objects be immutable.
+- Singletons save repeated setup for expensive shared resources.
+- Prototypes avoid repeating expensive initialisation.
+
+## Cons and limits
+
+- A singleton is effectively a global. It hides dependencies and makes tests harder to isolate.
+- Abstract factories are heavy when only one product type is needed.
+- A prototype copy is only as correct as the copy logic. Deep structures need deep copies.
+- Builders add a class and some boilerplate, which is not worth it for a two-field object.
+- Factories that switch on a type code bring back the open/closed problem.
+
+## Best practices
+
+- Prefer dependency injection over hand-written singletons. Let the container create one shared bean.
+- Use the holder idiom or an enum when a true singleton is needed.
+- Use copy constructors instead of `Cloneable`, and copy every mutable field.
+- Validate in `build()` rather than in each setter, so the object is checked once with all values known.
+- Start with a plain factory method. Move to an abstract factory only when families must match.
+- Keep builders for objects that actually have many optional parts.
 
 !!! tip "Interview tip"
-    Interviewers often ask, "How would you make a singleton thread-safe?" Name the holder idiom or the enum, explain why a `volatile` field is needed for double-checked locking, and then say that dependency injection is usually a better answer in an application.
+    **Q: How would you make a singleton thread-safe?**
+    Name the holder idiom or the enum, explain why a `volatile` field is needed for double-checked locking, and then say that dependency injection is usually a better answer in an application.
 
 ## Quick recap
 
 - Singleton: one instance, made safe with a holder class or an enum.
-- Factory Method: subclasses decide the concrete product; the caller depends on the interface.
+- Factory Method: subclasses decide the concrete product, and the caller depends on the interface.
 - Abstract Factory: creates families of products that must match.
-- Prototype: copy an existing object; prefer copy constructors to `Cloneable`.
+- Prototype: copy an existing object, and prefer copy constructors to `Cloneable`.
 - Builder: readable construction of objects with optional fields and validation.
+
+## Official documentation
+
+- [Spring Framework reference documentation](https://docs.spring.io/spring-framework/reference/)
+- [JDK 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Java Language Specification, SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
 
 **See also:** [Structural Patterns](structural-patterns.md), [Behavioural Patterns](behavioural-patterns.md), [SOLID and Anti-Patterns](solid-and-anti-patterns.md), [Dependency Injection](../08-spring-core/dependency-injection.md), [Design Patterns interview questions](../../interview-questions/technical/design-patterns-part-1.md)

@@ -1,11 +1,19 @@
 # Java Overview and Platform
 
-Java is an object-oriented language that compiles to bytecode and runs on a virtual machine, so the same compiled `.class` files run on any platform that has a matching JVM. Interviewers ask about this layer early because it explains most later answers about memory, performance, and deployment: what the JVM does, how the JDK differs from the JRE, and where garbage collection and class loading fit in.
+Java is an object-oriented language. It compiles to bytecode, and that bytecode runs on a virtual machine. The same compiled `.class` files run on any platform that has a matching JVM. Interviewers ask about this layer early, because it explains most later answers about memory, performance, and deployment. The questions cover what the JVM does, how the JDK differs from the JRE, and where garbage collection and class loading fit in.
 
-## Core concepts
+!!! note "In simple words"
+    Your Java code is compiled into a neutral set of instructions. A program called the JVM reads those instructions on each machine, manages memory, and runs your code. That is why the same build runs on Windows, macOS, and Linux.
+
+## Why it matters
+
+Java programs run inside a managed runtime. The runtime allocates objects, collects unused memory, loads classes on demand, and compiles hot code to machine instructions while the program runs. Knowing these parts helps you read stack traces, choose JVM options, diagnose memory problems, and answer design questions about performance in interviews.
+
+## How it works
 
 ### Source, bytecode, and the JVM
-Java source code (`.java`) is compiled by `javac` into bytecode (`.class`), an instruction set for a virtual machine rather than for a physical CPU. The JVM loads that bytecode, verifies it, interprets it, and compiles frequently used methods to native code with the just-in-time (JIT) compiler. The bytecode is portable; the JVM is platform-specific. That split is the basis of "write once, run anywhere."
+
+Java source code, in `.java` files, is compiled by `javac` into bytecode, in `.class` files. Bytecode is an instruction set for a virtual machine, not for a physical CPU. The JVM loads that bytecode, verifies it, interprets it, and compiles frequently used methods to native code with the just-in-time (JIT) compiler. The bytecode is portable, while each JVM is specific to its platform. That split is the basis of the phrase "write once, run anywhere."
 
 ```java
 public class PlatformInfo {
@@ -17,14 +25,15 @@ public class PlatformInfo {
 ```
 
 ### Verification and JIT compilation
-Before the JVM runs a class, the bytecode verifier checks the class file for structure and safety: stack discipline, valid jumps, and type-correct operations. A class that breaks those rules is rejected rather than run, which is part of why Java code cannot corrupt memory the way unchecked native code can.
+
+Before the JVM runs a class, the bytecode verifier checks the class file for structure and safety. It checks stack discipline, valid jumps, and type-correct operations. A class that breaks those rules is rejected rather than run. This is part of why Java code cannot corrupt memory the way unchecked native code can.
 
 The HotSpot JVM includes two JIT compilers:
 
 - **C1 (client compiler):** compiles quickly with light optimization. It suits short-lived programs and desktop tools, where long compile pauses are unwelcome.
 - **C2 (server compiler):** takes longer to compile and produces more optimized machine code. It suits long-running services.
 
-Modern JVMs use both through tiered compilation: methods start in the interpreter, warm methods move to C1, and the hottest ones are recompiled by C2 using the profiles gathered while the program ran.
+Modern JVMs use both through tiered compilation. Methods start in the interpreter. Warm methods move to C1. The hottest ones are recompiled by C2, using profiles gathered while the program ran.
 
 ### The platform layers: JVM, JRE, JDK
 
@@ -34,20 +43,24 @@ Modern JVMs use both through tiered compilation: methods start in the interprete
 | JRE | The JVM plus the standard class libraries needed to run programs | Running applications |
 | JDK | The JRE plus development tools such as `javac`, `jar`, `javadoc`, and `jshell` | Writing and building programs |
 
-Since Java 9 the JDK includes a modular runtime, and the `jlink` tool can build a slimmed-down runtime image for an application. Separate JRE downloads are much less common today, so in practice you install a JDK.
+Since Java 9, the JDK includes a modular runtime. The `jlink` tool can build a slimmed-down runtime image for an application. Separate JRE downloads are much less common today, so in practice you install a JDK.
 
 ### Editions
-- **Java SE (Standard Edition):** the core language, core libraries, and the JVM. Most of this playbook covers Java SE.
+
+- **Java SE (Standard Edition):** the core language, the core libraries, and the JVM. Most of this playbook covers Java SE.
 - **Jakarta EE (formerly Java EE):** enterprise APIs for servers, such as servlets and persistence. The project moved to the Eclipse Foundation and was renamed. Its packages moved from `javax.*` to `jakarta.*`.
 - **Java ME (Micro Edition):** a platform for embedded and mobile devices. It is now rare.
 
 ### JavaFX and client-side toolkits
+
 Desktop and rich-client interfaces use a GUI toolkit rather than the core libraries alone. Two toolkits serve this need:
 
 - **Swing:** the older desktop toolkit. It is still in the JDK and appears in many existing applications.
 - **JavaFX:** a newer toolkit with a scene graph, CSS styling, and FXML layouts. Since Java 11 it is not bundled with the JDK. It is maintained as the OpenJFX project and added to a build as a separate dependency.
 
-A JavaFX application needs its modules declared in the build, such as with Maven or Gradle, and the runtime must include them. Check the version that matches your JDK before you start a project.
+A JavaFX application needs its modules declared in the build, such as with Maven or Gradle, and the runtime must include them. Check that the JavaFX version matches your JDK before you start a project.
+
+The example below uses JavaFX. It needs the JavaFX modules on the module path, so it is shown for its shape and was not compiled here.
 
 ```java
 import javafx.application.Application;
@@ -73,15 +86,17 @@ public class HelloFx extends Application {
 For web or server work, the enterprise editions and frameworks such as Spring Boot are the usual choice, not a client toolkit.
 
 ### Release cadence and LTS
-Oracle ships a new feature release every six months, and some releases are designated long-term support (LTS). The roadmap recommends a current LTS release, such as 21 or 25. Feature releases between LTS versions receive only short-term support.
+
+Oracle ships a new feature release every six months. Some releases are designated long-term support (LTS) releases. The roadmap recommends a current LTS release, such as 21 or 25. Feature releases between LTS versions receive only short-term support.
 
 ### JVM memory areas
+
 - **Heap:** holds objects and arrays. It is shared by all threads and is managed by the garbage collector.
 - **Stack:** each thread has its own stack of method frames. A frame holds local variables and operand data. Very deep recursion ends in a `StackOverflowError`.
-- **Metaspace:** holds class metadata. It lives in native memory, not in the Java heap, and replaced PermGen in Java 8.
+- **Metaspace:** holds class metadata. It lives in native memory, not in the Java heap. It replaced PermGen in Java 8.
 - **Code cache:** stores machine code produced by the JIT compiler.
 - **Program counter (PC) register:** each thread has one. It records which bytecode instruction the thread is executing.
-- **Native memory:** memory the JVM and native libraries request from the operating system outside the heap.
+- **Native memory:** memory that the JVM and native libraries request from the operating system outside the heap.
 
 ```java
 public class StackDepth {
@@ -105,20 +120,22 @@ public class StackDepth {
 The printed number varies from run to run, because it depends on the stack size and the JVM.
 
 ### Garbage collectors
-The garbage collector reclaims objects that can no longer be reached from GC roots (such as live stack references and static fields). The main collectors are:
+
+The garbage collector reclaims objects that can no longer be reached from GC roots. GC roots include live stack references and static fields. The main collectors are:
 
 | Collector | Character | Typical flag |
 |---|---|---|
 | Serial | Single-threaded; all application threads stop during a collection; suited to small heaps and simple programs | `-XX:+UseSerialGC` |
 | Parallel | Multi-threaded collection; optimized for throughput, with longer pauses | `-XX:+UseParallelGC` |
 | CMS | Concurrent mark-sweep; removed in Java 14 | none |
-| G1 | Region-based, generational; the default since Java 9; aims for a pause-time goal | `-XX:+UseG1GC` |
-| ZGC | Low-latency collector that does most work concurrently; production-ready since Java 15 | `-XX:+UseZGC` |
+| G1 | Region-based and generational; the default since Java 9; aims for a pause-time goal | `-XX:+UseG1GC` |
+| ZGC | Low-latency collector that does most of its work concurrently; production-ready since Java 15 | `-XX:+UseZGC` |
 | Shenandoah | Low-pause collector that compacts concurrently; available in OpenJDK builds that include it | `-XX:+UseShenandoahGC` |
 | Epsilon | No-op collector that never reclaims memory; for tests and benchmarks only | `-XX:+UseEpsilonGC` |
 
 ### How the heap is collected
-Most objects die young, so the heap is split by age. New objects are allocated in the young generation (Eden plus two survivor spaces). A minor collection copies the few survivors out of Eden and into a survivor space; objects that survive long enough are promoted to the old generation. Minor collections are frequent and short. Major or full collections are rarer and cost more.
+
+Most objects die young, so the heap is split by age. New objects are allocated in the young generation, which holds Eden and two survivor spaces. A minor collection copies the few survivors out of Eden and into a survivor space. Objects that survive long enough are promoted to the old generation. Minor collections are frequent and short. Major or full collections are rarer and cost more.
 
 The collectors rely on a few basic algorithms:
 
@@ -135,9 +152,10 @@ java -Xms512m -Xmx2g -XX:+UseG1GC -Xlog:gc* MyApp
 java -XX:+UseZGC MyApp
 ```
 
-`-Xms` sets the initial heap size and `-Xmx` sets the maximum. `-Xlog:gc*` writes unified GC logs (JDK 9 and later). When reading a GC log, look at pause durations, how much heap each collection frees, and how often full collections happen. Frequent full collections usually mean the heap is too small or the application keeps too many objects alive.
+`-Xms` sets the initial heap size and `-Xmx` sets the maximum. `-Xlog:gc*` writes unified GC logs, available since JDK 9. When you read a GC log, look at pause durations, how much heap each collection frees, and how often full collections happen. Frequent full collections usually mean the heap is too small or the application keeps too many objects alive.
 
 ### Class loading
+
 Classes are loaded on demand by class loaders, which form a hierarchy:
 
 | Loader | Loads | Notes |
@@ -146,7 +164,7 @@ Classes are loaded on demand by class loaders, which form a hierarchy:
 | Platform | Remaining JDK platform modules | Called the Extension loader before Java 9 |
 | Application | Your classes from the classpath or module path | The loader that runs `main` |
 
-Loaders use **parent delegation**: a loader asks its parent to load a class first, and only loads it itself if the parent cannot. This is why application code cannot replace `java.lang.String` with its own version.
+Loaders use **parent delegation**. A loader asks its parent to load a class first, and it loads the class itself only if the parent cannot. This is why application code cannot replace `java.lang.String` with its own version.
 
 ```java
 public class LoaderDemo {
@@ -158,7 +176,8 @@ public class LoaderDemo {
 ```
 
 ### Modules (brief)
-Java 9 introduced the Java Platform Module System (JPMS). A module declares what it needs and what it exposes in a `module-info.java` file, which gives strong encapsulation beyond the access modifiers.
+
+Java 9 introduced the Java Platform Module System (JPMS). A module declares what it needs and what it exposes, in a `module-info.java` file. This gives stronger encapsulation than the access modifiers alone.
 
 ```java
 module com.example.orders {
@@ -171,15 +190,46 @@ Packages that are not exported are not visible to other modules, even if their c
 
 ## History
 
-Java started in 1991 at Sun Microsystems, in a project aimed at software for consumer electronics devices. James Gosling led the work, with Mike Sheridan and Patrick Naughton among the original team. The language was first called Oak, and it was renamed Java in 1995 because another product already used that name.
+Java started in 1991 at Sun Microsystems, in a project aimed at software for consumer electronics devices. James Gosling led the work, with Mike Sheridan and Patrick Naughton among the original team. The language was first called Oak. It was renamed Java in 1995, because another product already used that name.
 
-Java was publicly announced in 1995, and Java 1.0 was released in January 1996. Its selling points were the JVM and bytecode, which let one compiled program run on many platforms; that idea is still the core of the platform. Early uses included applets in web browsers and server-side applications, and the platform grew through Java 1.x releases and then the Java 5 and later versions.
+Java was publicly announced in 1995, and Java 1.0 was released in January 1996. Its selling points were the JVM and bytecode, which let one compiled program run on many platforms. That idea is still the core of the platform. Early uses included applets in web browsers and server-side applications. The platform then grew through the Java 1.x releases and the Java 5 and later versions.
 
-Ownership changed in 2010. Oracle completed its acquisition of Sun that year and took over the Java platform. Sun had begun to open-source the JDK in 2006, and the OpenJDK project now holds the reference open-source implementation, with Oracle and other contributors working on it.
+Ownership changed in 2010. Oracle completed its acquisition of Sun that year and took over the Java platform. Sun had begun to open-source the JDK in 2006. The OpenJDK project now holds the reference open-source implementation, with Oracle and other contributors working on it.
+
+```mermaid
+flowchart LR
+    A[Source .java] --> B[javac]
+    B --> C[Bytecode .class]
+    C --> D[Class loaders]
+    D --> E[Bytecode verifier]
+    E --> F[Interpreter]
+    F --> G[JIT compiler]
+    G --> H[Native code]
+```
+
+## Where it is used
+
+- Backend services, batch jobs, and message consumers running on servers, often inside containers.
+- Build and developer tools such as the Maven and Gradle command-line runners, which execute on the JVM.
+- Enterprise systems that use Jakarta EE and frameworks such as Spring Boot.
+
+## Benefits
+
+- Portability: one set of bytecode runs on any platform with a matching JVM.
+- Managed memory: the garbage collector removes most manual memory management.
+- Runtime optimization: the JIT compiler speeds up code that runs often.
+- Mature tooling, monitoring, and a large ecosystem of libraries.
+
+## Cons and limits
+
+- Startup is slower than native binaries, and the JIT needs time to warm up.
+- Memory use is higher, because the JVM and its metadata take space beyond your objects.
+- Garbage collection pauses can affect latency-sensitive work, although modern collectors reduce them.
+- Choosing the right JVM options takes measurement, and the defaults may not suit every workload.
 
 ## How it works / Step by step
 
-1. `javac` compiles each `.java` file into one or more `.class` files containing bytecode.
+1. `javac` compiles each `.java` file into one or more `.class` files that contain bytecode.
 2. `java` starts the JVM, which creates the heap and the main thread's stack.
 3. The bootstrap loader loads core classes. The application loader loads your classes, using parent delegation.
 4. The JVM verifies the bytecode and starts interpreting it.
@@ -187,22 +237,38 @@ Ownership changed in 2010. Oracle completed its acquisition of Sun that year and
 6. Objects are allocated on the heap. The garbage collector reclaims those that are no longer reachable.
 
 ## Common pitfalls
+
 - Assuming a JRE is enough to compile code. Compiling needs the JDK.
 - Thinking Metaspace is part of the heap. It lives outside the Java heap, in native memory.
 - Believing garbage collection prevents all memory leaks. An object kept alive by a static field, a cache, or a listener is never collected.
-- Confusing `OutOfMemoryError` with a full heap alone. The error can also come from Metaspace or native memory running out, so check the message and the memory area it names.
+- Confusing `OutOfMemoryError` with a full heap alone. The error can also come from Metaspace or native memory running out. Check the message and the memory area it names.
 - Choosing a collector only for its name. Measure pauses and throughput with GC logs before switching flags.
 - Choosing a collector flag from old articles. CMS was removed in Java 14, and G1 is the default.
 - Importing `javax.*` packages in Jakarta EE 9 and later code, which expects `jakarta.*`.
 
+## Best practices
+
+- Start with the defaults. Change a collector or heap size only after measuring a real problem.
+- Turn on GC logging in production, so you can see pauses when an incident happens.
+- Set `-Xmx` below the container memory limit, so the JVM does not get killed by the orchestrator.
+- Use a current LTS JDK to get security fixes and collector improvements.
+- Keep long-lived caches bounded, so they cannot grow until the heap is full.
+
 !!! tip "Interview tip"
-    **Q: Why is Java both compiled and interpreted?** Compilation to bytecode happens once, ahead of time with `javac`. The JVM then interprets bytecode and JIT-compiles hot methods at run time, using profiling data that a static compiler does not have. You get portability and runtime optimization, at the cost of some startup time.
+    **Q: Why is Java both compiled and interpreted?** Compilation to bytecode happens once, ahead of time, with `javac`. The JVM then interprets bytecode and JIT-compiles hot methods at run time, using profiling data that a static compiler does not have. You get portability and runtime optimization, at the cost of some startup time.
 
 ## Quick recap
-- The JDK contains the compiler and tools, the JRE runs programs, and the JVM executes bytecode.
+
+- The JDK contains the compiler and tools. The JRE runs programs. The JVM executes bytecode.
 - The heap holds objects, each thread has its own stack, and Metaspace holds class metadata.
-- G1 is the default collector; CMS was removed in Java 14.
+- G1 is the default collector. CMS was removed in Java 14.
 - Class loaders delegate to their parent first, which protects core classes.
-- Java SE is the core edition; Jakarta EE is the enterprise edition.
+- Java SE is the core edition. Jakarta EE is the enterprise edition.
+
+## Official documentation
+
+- [Java Developer Site](https://dev.java/)
+- [Java SE 21 GC Tuning Guide](https://docs.oracle.com/en/java/javase/21/gctuning/)
+- [OpenJDK JEP Index](https://openjdk.org/jeps/)
 
 **See also:** [Environment Setup](environment-setup.md), [Syntax Basics](syntax-basics.md), [Git, IDEs and Command-Line Tools](git-ide-tools.md)

@@ -1,12 +1,17 @@
 # JPA and Hibernate
 
-JPA (Jakarta Persistence API) is the specification for mapping Java objects to relational tables. Hibernate is the most common implementation. Interviewers ask about JPA to see whether you understand what happens behind `save()`, why lazy loading breaks outside a transaction, and how to avoid N+1 queries.
+!!! note "In simple words"
+    JPA lets you treat database rows as Java objects. You mark a class as an entity, and the persistence layer loads, tracks, and saves it for you. Hibernate is the most common engine that does this work.
 
-## Core concepts
+## Why it matters
+
+JPA removes much of the SQL that a service would otherwise write by hand. The cost is hidden behaviour: a save that quietly becomes an UPDATE, a lazy field that fails outside a transaction, or a loop that fires one query per row. Interviewers ask about JPA to see whether you understand what happens behind `save()`, why lazy loading breaks outside a transaction, and how to avoid N+1 queries.
+
+## How it works
 
 ### Entities and mapping
 
-An entity is a class mapped to a table. The specification is in the `jakarta.persistence` package (Jakarta EE); Spring Boot 3 uses this namespace, and older code uses `javax.persistence`.
+An entity is a class mapped to a table. The API lives in the `jakarta.persistence` package, which Spring Boot 3 uses. Older code uses `javax.persistence`.
 
 ```java
 import jakarta.persistence.*;
@@ -30,10 +35,6 @@ public class Order {
     protected Order() {                        // JPA requires a no-argument constructor
     }
 
-    public Order(String status) {
-        this.status = status;
-    }
-
     public Long getId() { return id; }
     public String getStatus() { return status; }
     public List<OrderLine> getLines() { return lines; }
@@ -48,6 +49,7 @@ public class Order {
 ```java
 import jakarta.persistence.*;
 
+// Same package as Order
 @Entity
 public class OrderLine {
 
@@ -74,9 +76,9 @@ public class OrderLine {
 }
 ```
 
-`@Table`, `@Id`, `@GeneratedValue`, and `@Column` control the table and column mapping. `GenerationType.IDENTITY` relies on an auto-increment column; `SEQUENCE` uses a database sequence and allows batching of inserts.
+These classes should compile with Java 21 when Jakarta Persistence is on the classpath. `@Table`, `@Id`, `@GeneratedValue`, and `@Column` control the table and column mapping.
 
-### Relationships and cascades
+### Relationships, fetch defaults, and cascades
 
 | Annotation | Default fetch | Typical use |
 |---|---|---|
@@ -85,49 +87,56 @@ public class OrderLine {
 | `@ManyToOne` | EAGER | Child to parent (set LAZY explicitly) |
 | `@ManyToMany` | LAZY | Many-to-many through a join table |
 
-`mappedBy` marks the inverse side; the side with `@JoinColumn` owns the foreign key. `cascade` propagates operations (persist, remove, merge) to the related entities. `orphanRemoval = true` deletes children that are removed from the collection.
+The side that holds `@JoinColumn` owns the foreign key. The side with `mappedBy` is the inverse side, and Hibernate ignores it when it writes. `cascade` passes operations such as persist, remove, and merge on to related entities. `orphanRemoval = true` deletes a child that is removed from its parent's collection.
 
-Make `@ManyToOne` lazy explicitly. The JPA default is eager, which can load far more data than you need.
+Set `@ManyToOne` to lazy explicitly. The JPA default is eager, which can load far more data than the caller needs.
 
 ### Fetch strategies and JOIN FETCH
 
-`LAZY` loads an association when it is first accessed; `EAGER` loads it with the parent. Lazy loading uses proxy objects that query the database on first access. Accessing a lazy association after the session has closed throws `LazyInitializationException`.
+`LAZY` loads an association when it is first accessed. `EAGER` loads it together with the parent. A lazy association is a proxy that queries the database on first access. If the session is closed by then, the access throws `LazyInitializationException`.
 
-Load what you need in one query with `JOIN FETCH`:
+To load what you need in one query, use `JOIN FETCH`:
 
 ```java
 import jakarta.persistence.EntityManager;
 import java.util.List;
 
-// JPQL: returns orders with their lines in one SQL statement
+// JPQL: returns orders with their lines in one SQL statement (JPA example)
 List<Order> orders = entityManager.createQuery(
         "select distinct o from Order o join fetch o.lines where o.status = :status", Order.class)
     .setParameter("status", "NEW")
     .getResultList();
 ```
 
-`distinct` removes duplicate parent rows that the join produces. Do not fetch-join two collections at once; the result becomes a cross product and Hibernate may reject it with a `MultipleBagFetchException`. Hibernate's `@Fetch` annotation controls the SQL strategy (for example, `SUBSELECT` or `BATCH`) and is a useful tuning tool for collections.
+`distinct` removes the duplicate parent rows that the join creates. Do not fetch two `List` collections in one query. The result becomes a cross product, and Hibernate may reject it with a `MultipleBagFetchException`. Hibernate's `@Fetch` annotation chooses the SQL strategy (`SELECT`, `JOIN`, or `SUBSELECT`). Batch loading is a separate setting, `@BatchSize`.
 
 ### Queries
 
-- **JPQL:** queries over entities and their attributes, not tables. Portable across JPA providers.
-- **HQL:** Hibernate's superset of JPQL. Mostly compatible for everyday queries.
-- **Criteria API:** builds queries as typed Java objects. Useful for dynamic filters; verbose.
-- **Native SQL:** raw SQL with `createNativeQuery`. Use it when you need database-specific features, and map results carefully.
+- **JPQL** queries entities and their attributes rather than tables. It is portable across JPA providers.
+- **HQL** is Hibernate's superset of JPQL. For everyday queries the two are almost the same.
+- **Criteria API** builds queries as typed Java objects. It suits dynamic filters but is verbose.
+- **Native SQL** runs raw SQL through `createNativeQuery`. Use it for database-specific features, and map the results carefully.
 
-Always bind parameters (`:name` or `?1`). String concatenation in JPQL is the same injection risk as in JDBC.
+Always bind parameters with `:name` or `?1`. Concatenating strings into JPQL carries the same injection risk as concatenating SQL in JDBC.
 
-### Lifecycle and callbacks
+### Lifecycle and dirty checking
 
-An entity moves through states: **new** (not persisted), **managed** (attached to a persistence context), **detached** (was managed, now not), and **removed**. Changes to a managed entity are written to the database at flush time, without an explicit `update` call (dirty checking).
+An entity moves between states. A managed entity's changes are written at flush time, without an explicit update call. Hibernate finds those changes by comparing the entity with a snapshot of its loaded state. This is called dirty checking.
 
-Lifecycle callbacks run on state changes:
+```mermaid
+stateDiagram-v2
+    [*] --> New
+    New --> Managed: persist
+    Managed --> Detached: close or clear
+    Detached --> Managed: merge
+    Managed --> Removed: remove
+    Removed --> [*]
+```
+
+Lifecycle callbacks run on those transitions:
 
 ```java
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
+import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
@@ -152,19 +161,14 @@ public class Customer {
 }
 ```
 
-Callbacks are methods on the entity (or on a separate listener class registered with `@EntityListeners`). Keep them simple; a callback that calls other services is hard to test and easy to get wrong.
+Keep callbacks simple. A callback that calls other services is hard to test and easy to get wrong.
 
-### Auditing timestamps with @CreationTimestamp and @UpdateTimestamp
+### Auditing timestamps
 
-Most tables need to record when a row was created and last changed. Writing those values by hand in every service is easy to forget. Hibernate's `@CreationTimestamp` and `@UpdateTimestamp` fill the columns for you when the entity is saved.
+Filling `created` and `updated` columns by hand in every service is easy to forget. Hibernate's `@CreationTimestamp` and `@UpdateTimestamp` fill them automatically.
 
 ```java
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import java.time.Instant;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -187,42 +191,34 @@ public class Invoice {
 }
 ```
 
-The two annotations behave differently:
+- `@CreationTimestamp` sets the value on insert. `updatable = false` protects it from later changes.
+- `@UpdateTimestamp` sets the value on insert and again whenever a flush writes changes. An unchanged entity keeps its old value.
 
-- `@CreationTimestamp` sets the value when the entity is inserted. Keeping `updatable = false` on the column protects it from later changes.
-- `@UpdateTimestamp` sets the value on insert and again each time the entity is flushed with changes. Hibernate only writes it when a column is actually dirty, so an unchanged entity keeps its old value.
+Prefer `Instant` or `OffsetDateTime` for stored timestamps. A `LocalDateTime` has no time zone, so it is ambiguous when the application runs in more than one zone.
 
-Both work with the `java.time` types such as `Instant`, `OffsetDateTime`, and `LocalDateTime`. Prefer `Instant` or `OffsetDateTime` for stored timestamps. A `LocalDateTime` has no zone, so it is ambiguous when the application runs in more than one time zone.
+Some writes skip these annotations, and interviewers often test this. A bulk JPQL or HQL update runs in the database and never touches the entity, so `updatedAt` stays stale unless the query sets it. Lifecycle callbacks such as `@PreUpdate` do not run for bulk updates either. Native SQL and direct JDBC writes bypass Hibernate completely.
 
-Some writes bypass the annotations, and this is the part interviewers test:
+Spring Data offers a portable alternative with `@CreatedDate`, `@LastModifiedDate`, and `@EnableJpaAuditing`. The Hibernate annotations need no setup, but they are specific to Hibernate.
 
-- A bulk JPQL or HQL update (`UPDATE Invoice i SET ...`) runs in the database and does not touch the entity, so `updatedAt` stays stale. Set it in the query yourself.
-- Native SQL and direct JDBC writes do not go through Hibernate at all.
-- Lifecycle callbacks such as `@PreUpdate` do not run for bulk updates either.
+### The persistence context
 
-Spring Data offers a more portable option. `@CreatedDate` and `@LastModifiedDate` work with `@EntityListeners(AuditingEntityListener.class)` and `@EnableJpaAuditing`, and `@CreatedBy` and `@LastModifiedBy` take their values from an `AuditorAware` bean. The Hibernate annotations are simpler and need no configuration, but they are specific to Hibernate.
-
-### The persistence context and first-level cache
-
-The `EntityManager` (Hibernate's `Session`) holds the **persistence context**, which is also the first-level cache. Within one context, loading the same ID twice returns the same Java object. The cache lasts only for the context, usually one transaction.
-
-A second-level cache is optional and shared across sessions. It needs explicit configuration and cache invalidation rules.
+The `EntityManager` (Hibernate's `Session` underneath) holds the **persistence context**, which is also the first-level cache. Within one context, loading the same ID twice returns the same Java object. The cache lasts as long as the context, usually one transaction. A second-level cache is optional, shared across sessions, and needs its own configuration and invalidation rules.
 
 ### Detached entities and merge
 
-An entity is detached once its context closes. Changes to a detached object are not saved automatically. `merge()` copies a detached object's state onto a managed copy and returns that copy; use the returned instance, not the original.
+An entity becomes detached when its context closes. Changes to a detached object are not saved. `merge()` copies the detached object's state onto a managed copy and returns that copy. Use the returned instance, not the original argument.
 
 ### ID generation strategies
 
-The `@GeneratedValue` strategy decides where an identifier comes from. Pick it with the target database in mind.
+The `@GeneratedValue` strategy decides where an identifier comes from. Choose it with the target database in mind.
 
 | Strategy | Source of the ID | Notes |
 |---|---|---|
 | `IDENTITY` | Auto-increment column | Simple. Hibernate must run the INSERT to learn the ID, so insert batching is limited |
 | `SEQUENCE` | Database sequence | Preferred on PostgreSQL, Oracle, and similar. `allocationSize` must match the sequence's increment |
-| `TABLE` | Rows in a helper table | Portable, but slow under contention; rarely the right choice now |
+| `TABLE` | Rows in a helper table | Portable, but slow under contention. Rarely the right choice now |
 | `AUTO` | Chosen by the dialect | Convenient, but the strategy can change when you switch databases |
-| Assigned in code | Your application | Used for UUIDs created in the application and for imports that carry their own IDs |
+| Assigned in code | Your application | UUIDs created in the application, and imports that carry their own IDs |
 
 ```java
 import jakarta.persistence.*;
@@ -233,11 +229,11 @@ public class Invoice {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "invoice_seq")
     @SequenceGenerator(name = "invoice_seq", sequenceName = "invoice_seq", allocationSize = 50)
-    private Long id;   // the sequence must be created with INCREMENT BY 50
+    private Long id;   // the database sequence must be created with INCREMENT BY 50
 }
 ```
 
-A UUID assigned in code needs no database round trip and stays unique across services:
+A UUID assigned in code needs no database round trip, and it stays unique across services:
 
 ```java
 import jakarta.persistence.Entity;
@@ -252,69 +248,30 @@ public class Shipment {
 }
 ```
 
-### Persisting: persist, save, merge, and update
+Spring Data treats an entity with a non-null ID as existing, so `save` calls `merge` for it. That can add a SELECT before the INSERT. Implement `Persistable` or use a version field when this matters.
 
-Four operations come up in interviews. They differ in the state the entity must be in when you call them.
+### persist, save, merge, and update
+
+The four operations differ in the state the entity must be in when you call them.
 
 | Operation | Expected input | Result | Typical use |
 |---|---|---|---|
 | `persist` (JPA `EntityManager`) | New (transient) | Managed; INSERT at flush or commit | Creating new entities |
 | `save` (Spring Data) | New or detached | Returns the managed instance | Everyday repository writes |
 | `merge` (JPA) | Detached | Returns a new managed copy; the argument stays detached | Writing back a detached object |
-| `update` (Hibernate `Session`) | Detached | Reattaches the same object for an UPDATE | Rare. It is a Hibernate-native API; `EntityManager` has no `update` method |
+| `update` (Hibernate `Session`) | Detached | Reattaches the same object for an UPDATE | Rare. Hibernate-native; `EntityManager` has no `update` method |
 
-Spring Data's `save` calls `persist` when the entity is new (its ID is null, or it has no version value) and `merge` otherwise. With `SEQUENCE`, the ID is fetched at `persist` time. With `IDENTITY`, Hibernate runs the INSERT straight away to get the ID.
+Spring Data's `save` calls `persist` for a new entity. An entity is new when its ID is null, or, if it has a version attribute, when that version is null. Otherwise `save` calls `merge`.
 
-```java
-import jakarta.persistence.Entity;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.Id;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+In a Spring service (a library example, not compiled here), `em.find` inside a `@Transactional` method returns a managed object, and changing it is enough: dirty checking writes the UPDATE at commit. `em.merge` on a detached object returns a new managed copy, so the service must return or use that copy.
 
-@Entity
-class Customer {
-    @Id
-    private Long id;
-    private String name;
+### Flush and dirty checking in practice
 
-    void setName(String name) { this.name = name; }
-}
-
-@Service
-class CustomerWriter {
-
-    private final EntityManager em;
-
-    CustomerWriter(EntityManager em) {
-        this.em = em;
-    }
-
-    @Transactional
-    public Customer rename(Long id, String newName) {
-        Customer managed = em.find(Customer.class, id);
-        managed.setName(newName);     // dirty checking writes the UPDATE at commit
-        return managed;
-    }
-
-    @Transactional
-    public Customer saveDetached(Customer detached) {
-        return em.merge(detached);    // use the returned instance, not the argument
-    }
-}
-```
-
-### Dirty checking and flush
-
-Hibernate keeps a snapshot of each managed entity's state. At flush, it compares the current state with the snapshot and writes SQL for the differences. That is why a managed entity needs no explicit save.
-
-- A flush runs before commit. In the default `AUTO` mode it also runs before a query, so the query sees the pending changes.
-- `em.flush()` sends pending SQL now, still inside the transaction. `em.clear()` detaches everything, which helps in long batch jobs that would otherwise grow the persistence context.
-- Without a transaction there is no commit point. A read returns a detached entity (unless open-session-in-view is active), so later changes are never written.
+- A flush sends pending SQL to the database. It always runs before a commit. In the default `AUTO` mode it also runs before a query that touches the affected tables, so the query sees the pending changes.
+- `em.flush()` sends pending SQL now, still inside the transaction. `em.clear()` detaches every entity, which helps in long batch jobs.
+- Without a transaction there is no commit point. A read returns a detached entity, unless open-session-in-view is active, so later changes are never written.
 
 ### Cascade types
-
-`cascade` says which operations on the parent also apply to its children.
 
 | Type | Effect on children |
 |---|---|
@@ -329,7 +286,7 @@ Hibernate keeps a snapshot of each managed entity's state. At flush, it compares
 
 ### Many-to-many and one-to-one
 
-A many-to-many association needs a join table. One side owns it with `@JoinTable`; the other side points back with `mappedBy`.
+A many-to-many association needs a join table. One side owns it with `@JoinTable`, and the other side points back with `mappedBy`.
 
 ```java
 import jakarta.persistence.*;
@@ -362,7 +319,7 @@ A one-to-one works the same way: the side with `@JoinColumn` owns the foreign ke
 
 ### Composite keys with @EmbeddedId and @MapsId
 
-A join entity can use a composite key built from the two foreign keys. `@MapsId` says that the `order` association supplies one part of that key.
+A join entity can use a composite key made of two foreign keys. `@MapsId` says that the `order` association supplies one part of that key.
 
 ```java
 import jakarta.persistence.*;
@@ -398,17 +355,17 @@ class OrderItem {
 }
 ```
 
-The embedded key must implement `Serializable`, and `equals` and `hashCode` must use every field.
+The embedded key must implement `Serializable`, and its `equals` and `hashCode` must use every key field.
 
 ### Choosing identifiers
 
 - Use a surrogate key (a `Long` from `IDENTITY` or `SEQUENCE`, or a `UUID`) as the primary key.
-- Keep natural keys such as e-mail addresses as unique constraints, not as primary keys. If the value changes, it would have to change in every foreign key.
+- Keep natural keys such as e-mail addresses as unique constraints, not as primary keys. If a natural key changes, it must change in every foreign key.
 - Use UUIDs when IDs are created outside the database, for example by distributed services or offline clients. They are larger and index less compactly than sequential numbers.
 
-### Batch fetching and extra-lazy collections
+### Batch fetching
 
-When a join fetch is not possible (for example, you need pagination), batch fetching loads children for several parents in one query.
+When a join fetch is not possible, for example because you need pagination, batch fetching loads the children of several parents in one query. `@BatchSize` is Hibernate-specific. The portable form is the setting `hibernate.default_batch_fetch_size`.
 
 ```java
 import jakarta.persistence.*;
@@ -436,20 +393,9 @@ class Employee {
 }
 ```
 
-`@BatchSize` is Hibernate-specific. The portable setting is `hibernate.default_batch_fetch_size` in configuration. Hibernate's `@LazyCollection(LazyCollectionOption.EXTRA)` can count or check a collection without loading all of it, but it is Hibernate-only, so use it with care.
+### StatelessSession for bulk work
 
-## How it works / Step by step
-
-What happens during `entityManager.persist(order)` inside a transaction:
-
-1. The entity becomes managed and gets an ID (immediately for `IDENTITY`, at flush for `SEQUENCE` with batching).
-2. Cascades run: child entities marked with `CascadeType.PERSIST` are persisted too.
-3. At flush (before commit or before a query that needs it), Hibernate computes SQL from the changes and sends it.
-4. On commit, the transaction ends; the context closes, and the entities become detached.
-
-## StatelessSession
-
-A `StatelessSession` is a Hibernate session without a persistence context: no first-level cache, no dirty checking, no cascades, and no lazy loading. It suits bulk inserts and updates where tracking every entity wastes memory. Changes are not saved automatically, so call `update()` yourself. Entity listeners are not called. Open it with `emf.unwrap(SessionFactory.class).openStatelessSession()`, and for speed set `hibernate.jdbc.batch_size` and commit in chunks.
+A `StatelessSession` has no persistence context: no first-level cache, no dirty checking, no cascades, and no lazy loading. It suits bulk inserts, where tracking every entity wastes memory. Each call writes immediately, and entity listeners are not called. Open it with `emf.unwrap(SessionFactory.class).openStatelessSession()`, and commit in chunks.
 
 ```java
 import java.util.List;
@@ -474,15 +420,47 @@ class RowImporter {
 }
 ```
 
-## Common pitfalls
+### Step by step: what happens during persist
 
-- Accessing a lazy collection outside the transaction (`LazyInitializationException`). Fetch it inside the transaction, or fetch-join it.
-- The N+1 problem: loading parents, then one query per parent for children. Use `JOIN FETCH`, `@EntityGraph`, or batch fetching.
-- Fetch-joining two `List` collections in one query, which causes a cross product or an exception.
-- Using `EAGER` on `@ManyToOne` and `@OneToOne` without thinking, which pulls in extra tables.
-- Implementing `equals` and `hashCode` from mutable fields or the generated ID before it is assigned. Base equality on a stable business key, or on identity with care.
-- Relying on `merge()` but then using the original detached object.
-- Enabling open-session-in-view and assuming it is free. Spring Boot enables it by default and logs a warning; many teams turn it off and fetch explicitly.
+1. The entity becomes managed and receives its ID.
+2. Cascades run. Children mapped with `CascadeType.PERSIST` are persisted too.
+3. At flush, Hibernate computes the SQL from the changes and sends it.
+4. On commit, the transaction ends, the context closes, and the entities become detached.
+
+## Where it is used
+
+- **Service layers** in Spring Boot or Jakarta EE applications that model an aggregate, such as an order with its lines.
+- **CRUD-heavy domains** such as accounts, catalogues, and customer records.
+- **Bulk importers** that use `StatelessSession` or batching for large loads.
+- **Repositories** built on Spring Data JPA, which wrap these entities (see [Spring Data JPA](spring-data-jpa.md)).
+
+## Benefits
+
+- **Less SQL to write.** Basic CRUD is generated, and the mapping is declared in one place.
+- **Automatic change tracking.** Dirty checking writes only what changed.
+- **A first-level cache.** Repeated loads within one transaction reuse the same object.
+- **Portability.** The JPA API lets you change providers, and JPQL works across them.
+- **A clear object model.** Relationships are expressed as fields and collections.
+
+## Cons and limits
+
+- **Hidden queries.** Lazy loading and cascades can trigger SQL that is not visible in the calling code.
+- **The N+1 problem.** Loading parents and then children one by one is the most common performance bug.
+- **Lazy loading outside a transaction** throws `LazyInitializationException`.
+- **Bulk operations bypass the model.** Callbacks, timestamps, and the persistence context do not see bulk JPQL or native SQL changes.
+- **Identity strategy limits.** `IDENTITY` restricts insert batching.
+- **Equality is tricky.** `equals` and `hashCode` based on mutable fields, or on an ID not yet assigned, can break `Set` membership.
+- **Open-session-in-view** keeps the session open for the whole web request. Spring Boot enables it by default and logs a warning. It hides lazy-loading mistakes and holds a connection longer.
+
+## Best practices
+
+- Mark `@ManyToOne` and `@OneToMany` as `LAZY`, and load what you need with `JOIN FETCH`, an entity graph, or batch fetching.
+- Fetch two `List` collections in separate queries, never in one.
+- Use the instance returned by `merge()`, and do not keep using the detached argument.
+- Use `Instant` for stored timestamps, and set bulk-update timestamps in the query.
+- Use `SEQUENCE` on PostgreSQL and Oracle, with an `allocationSize` that matches the database.
+- Base `equals` and `hashCode` on a stable business key, or on identity with care.
+- Turn off open-session-in-view, fetch explicitly in the service layer, and use `em.clear()` or `StatelessSession` in long batch work.
 
 !!! tip "Interview tip"
     **Q: What is the N+1 problem and how do you fix it?**
@@ -490,10 +468,16 @@ class RowImporter {
 
 ## Quick recap
 
-- JPA is the specification; Hibernate is a common implementation.
-- Mark `@ManyToOne` as `LAZY`; a lazy association must be loaded inside a transaction.
-- `JOIN FETCH` fixes N+1 but do not fetch two bag collections at once.
-- The persistence context is a first-level cache and tracks changes through dirty checking.
-- After a context closes, entities are detached; use the instance returned by `merge()`.
+- JPA is the specification, and Hibernate is a common implementation.
+- Mark `@ManyToOne` as `LAZY`. A lazy association must be loaded inside a transaction.
+- `JOIN FETCH` fixes N+1, but do not fetch two `List` collections at once.
+- The persistence context is a first-level cache, and it tracks changes through dirty checking.
+- After a context closes, entities are detached. Use the instance returned by `merge()`.
+
+## Official documentation
+
+- [Spring Data JPA reference documentation](https://docs.spring.io/spring-data/jpa/reference/index.html) (library: how Spring wraps JPA)
+- [Spring Boot reference documentation](https://docs.spring.io/spring-boot/reference/index.html) (library: open-session-in-view and JPA auto-configuration)
+- [PostgreSQL documentation](https://www.postgresql.org/docs/current/) (sequences and identity columns)
 
 **See also:** [JDBC](jdbc.md), [Spring Data JPA](spring-data-jpa.md), [DTO Mapping](dto-mapping.md)

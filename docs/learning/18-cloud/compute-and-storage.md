@@ -1,98 +1,132 @@
 # Compute and Storage on AWS: EC2, Lambda, and S3
 
-Compute and storage are where most AWS design questions start: which machine runs the code, how it is launched and reached, and where the data lives. This page goes deeper on three services: EC2 for virtual servers, Lambda for event-driven functions, and S3 for object storage. The overview of every service family is in [AWS](aws.md).
+!!! note "In simple words"
+    EC2 is a computer you rent and fully control. Lambda runs your code only when something triggers it, and you never touch a server. S3 keeps files under a name you choose, reachable over the network. It is not a disk you can mount.
 
-## Core concepts
+Compute and storage decide most early AWS designs: which machine runs the code, how it is started and reached, and where the data lives. This page goes deeper into three services: EC2 for virtual servers, Lambda for event-driven functions, and S3 for object storage. The map of every service family appears in [AWS](aws.md).
+
+## Why it matters
+
+Each application needs somewhere to execute and somewhere to keep its data. A poor choice costs money, slows releases, or loses information. An EC2 instance that is stopped may lose whatever sat on its local disk. A Lambda function asked to do long work will be cut off at its time limit. An S3 bucket accidentally opened to the public can expose customer files. Understanding these limits is the difference between a sound design and a fragile one.
+
+## How it works
+
+A common event-driven flow touches all three services. An API route triggers a function, the function fetches a secret, stores a file in S3, and records what happened. The sequence diagram shows the order of those calls.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as API Gateway
+    participant Fn as Lambda function
+    participant Sec as Secrets Manager
+    participant S3 as S3 bucket
+    Client->>Gateway: Upload request
+    Gateway->>Fn: Invoke with event
+    Fn->>Sec: Read credential using execution role
+    Sec-->>Fn: Secret value
+    Fn->>S3: Put object with versioning on
+    S3-->>Fn: Stored
+    Fn-->>Gateway: Result
+    Gateway-->>Client: 200 response
+```
 
 ### EC2 virtual servers
-Amazon EC2 (Elastic Compute Cloud) rents virtual servers, called instances, with chosen amounts of CPU, memory, storage, and networking. An instance starts from an **AMI** (Amazon Machine Image), which holds the operating system, installed software, and default configuration. You can use an AWS-provided AMI, a community AMI, or one you built yourself, for example with your application already installed.
 
-Storage attached to an instance comes in two kinds. **EBS** (Elastic Block Store) volumes are network-attached disks that persist after a stop. **Instance store** is physical disk on the host, fast but lost when the instance stops or fails. Keep data that must survive on EBS or in S3, not on instance store.
+Amazon EC2 (Elastic Compute Cloud) leases virtual servers called instances. You pick the CPU, memory, storage, and networking. Each instance boots from an **AMI** (Amazon Machine Image), a bundle of operating system, software, and default settings. The AMI can be one published by AWS, one from the community, or one you assembled with your application already in place.
+
+Two storage types can attach to an instance:
+
+- **EBS** (Elastic Block Store) volumes behave like network disks, and their contents survive a stop.
+- **Instance store** is physical disk attached to the host. It is quick, but anything on it disappears when the instance stops or its host fails.
+
+Anything that has to outlive the instance belongs on EBS or in S3, never only on instance store.
 
 ### Instance families
-Instance types group into families by what they optimise for. The family letter tells you the purpose, and a `g` suffix (such as `m7g`) marks Arm-based AWS Graviton processors.
 
-| Family | Optimised for | Typical use |
+Instance families are named after their emphasis. The letter at the front hints at the purpose, and a trailing `g` (as in `m7g`) means the instance runs on Arm-based Graviton processors.
+
+| Family | Emphasis | Common workloads |
 |---|---|---|
-| T | Burstable CPU with a baseline and accumulated credits | Small web servers, dev and test |
-| M | Balanced CPU and memory | General application servers, mid-size databases |
-| C | High CPU per unit of cost | Batch processing, CPU-heavy services, scientific work |
+| T | Burstable CPU that builds up credits when idle | Small web servers, development and test |
+| M | Even mix of CPU and memory | General application servers, mid-size databases |
+| C | Maximum compute for the price | Batch jobs, CPU-heavy services |
 | R, X, Z | Large memory | In-memory databases, caches, analytics |
-| I, D, H | High local storage throughput | Data warehouses, databases on local disks |
-| P, G, Inf, Trn | Hardware accelerators (GPUs, Inferentia, Trainium) | Machine learning training and inference, graphics |
+| I, D, H | Fast local storage | Data warehouses, databases on local disks |
+| P, G, Inf, Trn | Accelerators: GPUs, Inferentia, Trainium | Machine learning training and inference, graphics |
 | Hpc | Tightly coupled high-performance computing | Simulations, large numerical models |
 
-Choose from the workload: its CPU, memory, storage, and network needs, its performance target, its cost limit, and whether it must scale out. Measure with a realistic load before committing.
+Select a family from the workload's CPU, memory, storage, and network profile, along with its performance target and budget. Benchmark under realistic load before you settle.
 
 ### Purchasing options
-| Option | Commitment | Good for |
-|---|---|---|
-| On-Demand | None; pay per second of running time | Unpredictable or short workloads |
-| Savings Plans | A consistent spend per hour for one or three years | Steady usage across instance types |
-| Reserved Instances | A specific configuration (type and Region) for one or three years | Steady, predictable usage of one configuration |
-| Spot Instances | None; spare capacity that AWS can reclaim with a short warning | Interruptible batch, stateless workers |
-| Dedicated Hosts | A physical server for your use | Software licensed per socket or core, compliance rules |
-| Dedicated Instances | Single-tenant hardware, billed by the hour | Isolation without managing a whole host |
-| Capacity Reservations | Reserved capacity in one Availability Zone | Guaranteeing room to launch at a known time |
 
-Savings Plans and Reserved Instances reduce cost but reduce flexibility, so buy them for the baseline you are confident about, and use On-Demand for the rest. Check current AWS pricing before deciding.
+| Option | Commitment | Best suited to |
+|---|---|---|
+| On-Demand | None; billed for the time running | Unpredictable or short-lived work |
+| Savings Plans | A steady hourly spend over one or three years | Steady use spread across instance types |
+| Reserved Instances | A fixed configuration over one or three years | Predictable use of a single configuration |
+| Spot Instances | None; spare capacity that AWS may reclaim after a brief warning | Interruptible batch processing, stateless workers |
+| Dedicated Hosts | A whole physical server for you | Per-socket or per-core licensing, compliance rules |
+| Dedicated Instances | Single-tenant hardware, billed hourly | Isolation without managing a complete host |
+| Capacity Reservations | Guaranteed room in one Availability Zone | Making sure launches succeed at a known time |
+
+Savings Plans and Reserved Instances reduce the price but also reduce flexibility. Commit only to the baseline you are sure of, and run the rest On-Demand. Confirm the current rates before committing.
 
 ### User data
-User data is a script or set of directives passed to an instance at launch. It runs during the first boot: as root on Linux, or as administrator on Windows. Use it to install packages, write configuration, start services, or read instance metadata such as the instance ID or tags.
 
-Design user data with these rules in mind:
+User data is a script or directive set handed to an instance when it launches. It executes on first boot, as root on Linux or as Administrator on Windows. Typical uses are installing packages, writing configuration files, starting services, and reading instance metadata such as the instance ID or tags.
 
-- **Never put secrets in it.** User data is readable through the instance metadata service and the console. Fetch credentials from Secrets Manager or Parameter Store at runtime, using the instance role.
-- **Make it idempotent.** A script that might run twice should not break on the second run.
-- **Log and check errors.** On Linux, cloud-init writes its logs under `/var/log`. Read them first when an instance is misconfigured.
-- **Respect the size limit.** Raw user data is limited to 16 KB. For larger setups, use a configuration management tool or bake the software into the AMI.
+- **Never store secrets there.** Anyone able to read the instance metadata or the console can view user data. Pull credentials from Secrets Manager or Parameter Store at runtime, through the instance role.
+- **Write it to be safely re-runnable.** A script that could execute twice must not fail on its second pass.
+- **Check the logs.** On Linux, cloud-init records its activity under `/var/log`. Start there when an instance is misconfigured.
+- **Mind the size cap.** Raw user data is capped at 16 KB. For bigger setups, use a configuration management tool, or bake the software into the AMI.
 
 ### Security groups for EC2
-A security group is a stateful virtual firewall attached to instances or network interfaces. It holds allow rules for inbound and outbound traffic. Each rule names a protocol, a port or port range, and a source (for inbound) or destination (for outbound), given as an IP range, a CIDR block, or another security group.
 
-Important behaviours:
+A security group is a stateful firewall attached to instances or network interfaces, with allow rules for inbound and outbound traffic. Every rule specifies a protocol, a port or port range, and a source (inbound) or destination (outbound). That endpoint can be an IP range, a CIDR block, or another security group.
 
-- A new custom group allows no inbound traffic and allows all outbound traffic. Responses to allowed inbound requests are permitted automatically because the group is stateful.
-- Security groups are region- and VPC-scoped, and one group can attach to many instances.
-- A timeout usually means a security group blocks the traffic. A "connection refused" usually means the application is not listening, which is a different problem.
-- Keep a separate group for administrative access, and avoid leaving the default group in use for active resources.
+Behaviour worth remembering:
 
-Good practice is to scope each rule to the smallest source that works. Referencing another security group, such as "the web tier group", is safer than opening a port to `0.0.0.0/0`. Avoid large port ranges, and review and delete rules and groups that no longer serve a purpose.
+- A freshly created custom group permits no inbound traffic and all outbound traffic. Replies to permitted inbound connections are allowed automatically, because the group tracks state.
+- A security group belongs to one Region and one VPC, and a single group can be shared by many instances.
+- A **timeout** typically means a security group is dropping the packets. A **connection refused** typically means nothing is listening on that port. Treat them as different problems.
+- Maintain a dedicated group for administrative access, and do not run active resources in the default group.
 
-Ports worth knowing for interviews:
+Limit every rule to the narrowest source that serves the purpose. Pointing a rule at "the web tier group" beats exposing a port to `0.0.0.0/0`. Periodically prune rules and groups that nothing uses.
 
-| Port | Protocol | Purpose |
+| Port | Protocol | Use |
 |---|---|---|
-| 21 | FTP | File transfer (unencrypted; prefer SFTP or FTPS) |
+| 21 | FTP | File transfer without encryption; prefer SFTP or FTPS |
 | 22 | SSH | Encrypted remote shell |
-| 23 | Telnet | Old remote shell with no encryption; avoid |
-| 25 | SMTP | Mail transfer between servers |
-| 53 | DNS | Name resolution |
-| 80 | HTTP | Unencrypted web traffic |
+| 23 | Telnet | Legacy remote shell with no encryption; avoid |
+| 25 | SMTP | Mail relay between servers |
+| 53 | DNS | Name lookups |
+| 80 | HTTP | Plain web traffic |
 | 443 | HTTPS | Encrypted web traffic |
 
 ### Connecting to an instance
-There are four common ways to get a shell on an instance:
 
-1. **SSH with a key pair.** Simple and widely supported. You manage the private key, and SSH gives you no built-in audit of sessions, so the access trail is weaker.
-2. **EC2 Instance Connect.** AWS pushes a short-lived public key to the instance, then you connect with SSH or from the console. Key management is simpler, and the key is no longer a long-term secret.
-3. **Systems Manager Session Manager.** Needs the SSM Agent on the instance and suitable IAM permissions. No inbound port is opened and no key is needed, and sessions can be logged. It does not provide direct file transfer, and some port-forwarding and SSH-over-SSM traffic is not logged the same way, so check the current documentation.
-4. **EC2 Serial Console.** A low-level console for boot and network troubleshooting, reached from the EC2 console. It has connection limits, so use it for recovery, not as a daily method.
+There are four usual ways to open a shell on an instance:
 
-Prefer Session Manager for routine access because it needs no open inbound ports.
+1. **SSH with a key pair.** Easy and broadly supported. You own the private key, and SSH produces no built-in session audit.
+2. **EC2 Instance Connect.** AWS places a short-lived public key on the instance, and you connect over SSH. Key handling becomes simpler, and the key is no longer a standing secret.
+3. **Systems Manager Session Manager.** Requires the SSM Agent and suitable IAM permissions. It opens no inbound port and needs no key, and sessions can be recorded. Confirm in current documentation which traffic is logged.
+4. **EC2 Serial Console.** A low-level console for boot and networking faults, reached from the EC2 console. Its connections are limited, so keep it for recovery.
+
+For routine access, Session Manager is the better choice, since it removes the need for open inbound ports.
 
 ### Lambda functions
-AWS Lambda runs functions without you provisioning or managing servers. You upload code, choose a runtime and memory size, and Lambda runs it in response to events. Typical triggers are S3 uploads, DynamoDB streams, API Gateway requests, SQS messages, Kinesis records, EventBridge schedules, and SNS notifications.
 
-Key properties:
+AWS Lambda executes functions without any server provisioning on your side. You upload code, select a runtime and memory size, and Lambda runs the code whenever an event occurs. Common triggers include S3 uploads, DynamoDB streams, API Gateway requests, SQS messages, Kinesis records, EventBridge schedules, and SNS notifications. The [Lambda developer guide](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) is the authoritative reference.
 
-- **Scaling** is automatic: Lambda runs as many concurrent instances of the function as the event rate needs, subject to account concurrency limits.
-- **Billing** is by request count and by compute duration, measured in 1 ms increments, with the memory size as a factor.
-- **Timeouts**: the default is 3 seconds and the maximum is 15 minutes. A workload that runs longer than that does not fit Lambda.
-- **Cold starts** happen when a new execution environment initialises. Keep dependencies small, avoid heavy framework start-up where possible, and consider provisioned concurrency for latency-sensitive paths. Java cold starts are longer than Node.js or Python, so measure them.
-- **VPC attachment** lets a function reach private resources such as RDS, but it adds start-up time. Attach only when the function needs it.
+Key characteristics:
 
-A minimal Java handler, which needs the `aws-lambda-java-core` library on the classpath:
+- **Scaling is automatic.** Lambda starts as many concurrent executions as the event rate demands, subject to account concurrency limits.
+- **Billing** combines the request count with compute duration, metered in 1 ms steps and scaled by the configured memory.
+- **Timeouts.** The default is 3 seconds and the ceiling is 15 minutes. Anything longer will not fit.
+- **Cold starts** occur when a fresh execution environment is initialised. Shrink dependencies, avoid heavyweight framework boot, and consider provisioned concurrency on latency-sensitive paths. Java cold starts run longer than those of Node.js or Python, so measure before deciding.
+- **VPC attachment** gives access to private resources such as RDS, at the cost of extra start-up time. Attach a function to a VPC only when it truly needs one.
+
+A small Java handler. It requires the `aws-lambda-java-core` library, so it is a library example and is not compiled here:
 
 ```java
 import com.amazonaws.services.lambda.runtime.Context;
@@ -110,35 +144,39 @@ public class OrderEventHandler implements RequestHandler<Map<String, Object>, St
 }
 ```
 
-Keep the handler thin. Put business logic in plain classes that you can unit test without Lambda. Store secrets in Secrets Manager or Parameter Store, not in environment variables, where they are visible to anyone who can read the function configuration.
+Keep the handler slim, and place the logic in ordinary classes that tests can exercise without Lambda. Secrets belong in Secrets Manager or Parameter Store. Environment variables are a poor home, because anyone who can read the function configuration can see them.
 
 ### S3 object storage
-S3 (Simple Storage Service) stores objects, which are files plus metadata, inside buckets. Bucket names are globally unique, and each bucket lives in one Region. An object is identified by its key, which is the full path string. S3 is not a file system: there are no real directories, and a "folder" is only a shared prefix in the key.
 
-Features to know:
+S3 (Simple Storage Service) holds **objects**, meaning a file plus its metadata, inside **buckets**. Bucket names are unique across all of AWS, and a bucket resides in a single Region. Each object is addressed by its **key**, the complete path string.
 
-- **Versioning** keeps earlier versions of an object, which protects against accidental overwrites and deletes.
-- **Lifecycle rules** move objects to cheaper classes or delete them after a set age.
-- **Replication** copies objects to another bucket, in the same or another Region, for resilience or compliance.
+S3 is not a file system. It has no true directories. A "folder" is simply a shared prefix in the key. This shows up when you rename: changing a prefix means copying and deleting every object beneath it.
 
-Storage classes trade cost against retrieval speed:
+Features worth knowing:
 
-| Class | Relative cost | Retrieval | Use |
+- **Versioning** preserves earlier versions of each object, guarding against accidental overwrites and deletions.
+- **Lifecycle rules** shift objects into cheaper storage tiers, or delete them, once they reach a certain age.
+- **Replication** copies objects into another bucket in the same or a different Region, for resilience or compliance.
+
+Storage tiers trade price against how quickly data can be retrieved:
+
+| Tier | Relative price | Retrieval speed | Use |
 |---|---|---|---|
-| S3 Standard | Highest storage cost | Immediate | Frequently accessed data |
-| S3 Intelligent-Tiering | Varies | Immediate | Access patterns you cannot predict |
-| S3 Standard-IA | Lower storage cost | Immediate, with a retrieval fee | Infrequently accessed data |
-| S3 Glacier classes | Low | Minutes to hours | Archives and backups |
-| S3 Glacier Deep Archive | Lowest | Hours (typically 12 or more) | Long-term retention |
+| S3 Standard | Highest storage price | Immediate | Data read often |
+| S3 Intelligent-Tiering | Varies | Immediate | Access patterns you can't forecast |
+| S3 Standard-IA | Lower storage price | Immediate, with a retrieval charge | Data read rarely |
+| S3 Glacier tiers | Low | Minutes to hours | Archives and backups |
+| S3 Glacier Deep Archive | Lowest | Typically 12 hours or more | Long-term retention |
 
 ### Access control and encryption
-- **Block Public Access** is on by default for new buckets. Keep it on unless a bucket truly must serve the public, such as a static site behind a CDN.
-- **Bucket policies** grant access to principals, and **IAM policies** grant access to roles and users. Use them rather than per-object ACLs, which AWS now disables by default on new buckets.
-- **Pre-signed URLs** grant temporary access to a single private object, valid for a set time.
-- Objects are encrypted at rest. S3 applies server-side encryption by default; you can choose SSE-KMS with a customer-managed key for audit and key control. Requests should use HTTPS, which can be enforced in the bucket policy.
-- **MFA Delete** can require MFA to permanently delete object versions or change versioning.
 
-A short Java example with the AWS SDK for Java v2 (the `s3` module):
+- **Block Public Access** is enabled by default for new buckets. Leave it on unless a bucket must serve anonymous visitors, such as a static site fronted by a CDN.
+- **Bucket policies** and **IAM policies** control access. Prefer them to per-object ACLs, which AWS now disables by default on new buckets.
+- **Pre-signed URLs** give time-limited access to a single private object.
+- Stored objects are encrypted automatically with server-side encryption. For audit and key control, select SSE-KMS with a customer-managed key. A bucket policy can demand HTTPS on every request.
+- **MFA Delete** can require MFA before object versions are permanently removed or versioning is switched off.
+
+A brief example with the AWS SDK for Java v2 `s3` module. It is a library example and is not compiled here:
 
 ```java
 import java.net.URL;
@@ -176,34 +214,68 @@ public class ArchiveClient {
 }
 ```
 
-## How it works / Step by step
-A typical request that uses these services:
+### Auto scaling and EC2 fleets
 
-1. An API Gateway route invokes a Lambda function.
-2. The function's execution role lets it read a secret and write one object to S3.
-3. The function stores the upload in a bucket with versioning and Block Public Access enabled.
-4. A lifecycle rule later moves the object to an archive class.
-5. CloudWatch Logs captures the function's output for troubleshooting.
+An Auto Scaling group maintains instances between a minimum and a maximum count, and swaps out instances that fail their health checks. It performs best with stateless servers behind a load balancer. Put uploaded files in S3 and session state in a shared store, so that any instance can serve any request.
+
+## Where it is used
+
+- EC2 for legacy applications, specialised software, GPU work, and steady-state capacity.
+- Lambda for webhooks, processing files as they land in S3, and scheduled jobs that finish inside the timeout.
+- S3 for static assets, backups, data lakes, logs, and build artefacts.
+- Mixed designs, where a web tier runs on EC2 or containers and background work runs on Lambda.
+
+## Benefits
+
+- **EC2 offers complete control** over the operating system and software stack.
+- **Lambda removes server chores**, absorbs bursts, and charges only for execution.
+- **S3 is durable and elastic**, requires no capacity planning, and works with most AWS services.
+- **Purchasing options** lower the cost of steady workloads without any code changes.
+
+## Cons and limits
+
+- **EC2 means ongoing operations**, covering patching, scaling, and capacity.
+- **Lambda's 15-minute cap** and cold starts make some work unsuitable, and debugging is harder than on a long-running process.
+- **S3 is not a file system.** Renames and listings behave differently from a disk.
+- **Instance store disappears** on stop or failure, so it must never hold the only copy of anything.
+- **Costs creep** through forgotten instances, storage without lifecycle rules, and cross-Region transfer.
+
+## Best practices
+
+- Keep instances stateless, and store data on EBS, EFS, S3, or a managed database.
+- Keep secrets out of user data and Lambda environment variables. Use Secrets Manager or Parameter Store.
+- Restrict security group rules to other groups, and reach instances through Session Manager or Instance Connect instead of open SSH.
+- Keep the Lambda handler minimal, and test the business logic in plain classes.
+- Turn on versioning and Block Public Access for buckets, and add lifecycle rules for aging data.
+- Keep one backup copy in a second Region when your recovery target demands it.
 
 ## Common pitfalls
-- Expecting EC2 instance store to keep data after a stop or host failure.
-- Putting passwords into user data or Lambda environment variables.
+
+- Expecting instance store contents to survive a stop or a host failure.
+- Placing passwords in user data or in Lambda environment variables.
 - Opening port 22 or 3389 to `0.0.0.0/0` for convenience.
-- Picking a large EC2 family, or On-Demand, for a steady baseline that a Savings Plan would cover at lower cost.
-- Choosing Lambda for a job that runs longer than the 15-minute limit, or for steady high-throughput work that a container runs more cheaply.
-- Treating S3 prefixes as directories, then expecting a rename of a "folder" to be cheap. It copies and deletes every object.
-- Publishing a bucket to the internet by turning off Block Public Access without a reason.
-- Keeping the only backup in the same Region as the data. A Region-level outage then takes both copies. Replicate backups to another Region if the recovery target requires it.
+- Paying On-Demand rates, or buying an oversized family, for a steady baseline that a Savings Plan would cover more cheaply.
+- Using Lambda for jobs longer than 15 minutes, or for steady high-throughput work that a container handles more economically.
+- Assuming a "folder" rename in S3 is cheap. It copies and deletes each object.
+- Disabling Block Public Access to publish a bucket without a sound reason.
+- Storing the only backup in the same Region as the data, so one Region outage removes both copies.
 
 !!! tip "Interview tip"
     **Q: When would you choose EC2, Lambda, or containers for a service?**
-    EC2 when you need full control of the operating system, specialised software, or steady capacity. Containers (ECS or EKS) when you have several services that should be packaged and scaled the same way. Lambda for event-driven, short-running work with spiky traffic and no server to manage. Support the answer with the cost and timeout trade-offs.
+    Choose EC2 for full operating-system control, specialised software, or steady capacity. Choose containers on ECS or EKS when several services should be packaged and scaled the same way. Choose Lambda for short, event-driven work with spiky traffic and no servers to run. Back the answer with the cost and timeout trade-offs.
 
 ## Quick recap
-- An EC2 instance starts from an AMI; instance families are chosen by workload, and purchasing options trade commitment for price.
-- User data runs once at first boot and must never carry secrets.
-- Security groups are stateful instance-level firewalls; a timeout points to the network, a refusal points to the application.
-- Lambda scales automatically with a 15-minute maximum runtime; keep handlers thin and watch cold starts.
-- S3 stores objects in buckets; storage classes trade cost for retrieval speed, and Block Public Access and IAM policies control access.
+
+- An EC2 instance starts from an AMI. Families follow the workload, and purchasing options trade commitment for price.
+- User data runs once at boot and must never carry secrets.
+- Security groups are stateful firewalls on instances. A timeout points at the network, while a refusal points at the application.
+- Lambda scales itself, but tops out at 15 minutes per run. Keep handlers small, and watch cold starts.
+- S3 stores objects in buckets. Storage tiers trade cost for retrieval speed, while Block Public Access and IAM policies govern access.
+
+## Official documentation
+
+- [Amazon EC2 User Guide: concepts](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html)
+- [Amazon S3 User Guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)
+- [AWS Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)
 
 **See also:** [AWS](aws.md), [IAM and Security Basics](iam-and-security-basics.md), [Multi-Cloud Considerations](multi-cloud.md)

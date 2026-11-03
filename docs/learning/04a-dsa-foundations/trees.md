@@ -1,48 +1,46 @@
 # Trees
 
-A tree is a connected structure with no cycles, and a binary tree gives each node at most two children. Trees appear in interviews because recursion fits them naturally, and because the same few techniques (traversal, passing information up from children, and tracking a best answer) solve a wide range of problems. Knowing the cost in terms of tree height, not just node count, is what separates a good answer from a complete one.
+!!! note "In simple words"
+    A tree is a set of nodes linked from one top node, the root, down to leaves that have no children. A binary search tree keeps smaller values on the left and larger values on the right, so you can find a value by going down one path.
 
-## Core concepts
+## Why it matters
+
+Trees show up in interviews because recursion fits them naturally. A few techniques cover a wide range of questions: traversal, passing information from children up to the parent, and keeping track of a best answer as you go. A strong answer also states the cost in terms of the tree's height, not only its number of nodes, because the height is what decides the speed of a search in a binary search tree.
+
+## How it works
 
 ### Node structure
-The examples on this page assume the node class below, nested in a `TreeDemo` class. The examples also use `java.util` collections, so add the imports you need.
+
+The examples on this page use the node class below. Save it as `TreeNode.java` in the same folder as the examples.
 
 ```java
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
-import java.util.Queue;
+public class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
 
-public class TreeDemo {
-
-    static final class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-
-        TreeNode(int val) {
-            this.val = val;
-        }
+    TreeNode(int val) {
+        this.val = val;
     }
 }
 ```
 
 ### Binary search trees
-A binary search tree (BST) keeps every value in the left subtree smaller than the node and every value in the right subtree larger. Search, insert, and delete all follow one path from the root, so their cost is O(h), where h is the height. In a balanced tree h is O(log n). In a skewed tree, where each node has one child, h is n and the BST degrades to a linked list.
+
+A binary search tree (BST) keeps every value in the left subtree smaller than the node, and every value in the right subtree larger. Search, insert, and delete all follow a single path from the root. Their cost is O(h), where h is the height. In a balanced tree, h is about log n. In a skewed tree, where every node has one child, h equals n, and the BST behaves like a linked list.
 
 ```java
-import java.util.*;
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class BstOps {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static TreeNode insert(TreeNode root, int val) {
         if (root == null) {
             return new TreeNode(val);
@@ -52,7 +50,7 @@ public class BstOps {
         } else if (val > root.val) {
             root.right = insert(root.right, val);
         }
-        return root;   // duplicates are ignored in this version
+        return root;                 // duplicates are ignored in this version
     }
 
     static boolean contains(TreeNode root, int val) {
@@ -65,17 +63,27 @@ public class BstOps {
         }
         return false;
     }
+
+    public static void main(String[] args) {
+        TreeNode root = null;
+        for (int v : new int[] {5, 3, 8, 1, 4}) {
+            root = insert(root, v);
+        }
+        System.out.println(contains(root, 4));   // true
+        System.out.println(contains(root, 7));   // false
+    }
 }
 ```
 
-Inserting values in sorted order creates a skewed tree, so a plain BST is not safe for sorted input. That is why balanced trees exist.
+Inserting values in sorted order creates a skewed tree, so a plain BST is unsafe for sorted input. That is the reason balanced trees exist.
 
 ### Traversals
-There are four standard orders. Depth-first traversals are pre-order, in-order, and post-order. Breadth-first traversal is level-order.
+
+There are four standard orders. Three are depth-first: pre-order, in-order, and post-order. The fourth is breadth-first, called level-order.
 
 | Order | Visit sequence | Typical use |
 |---|---|---|
-| Pre-order | Node, left, right | Copying a tree, serialisation |
+| Pre-order | Node, left, right | Copying a tree, serializing it |
 | In-order | Left, node, right | Sorted output of a BST |
 | Post-order | Left, right, node | Deleting a tree, computing values from children |
 | Level-order | Level by level | Printing layers, finding the shallowest match |
@@ -83,17 +91,34 @@ There are four standard orders. Depth-first traversals are pre-order, in-order, 
 In-order traversal of a BST returns the values in ascending order.
 
 ```java
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
+
+class BstOps {
+    static TreeNode insert(TreeNode root, int val) {
+        if (root == null) {
+            return new TreeNode(val);
+        }
+        if (val < root.val) {
+            root.left = insert(root.left, val);
+        } else if (val > root.val) {
+            root.right = insert(root.right, val);
+        }
+        return root;
+    }
+}
 
 public class TreeTraversal {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static void inorder(TreeNode node, List<Integer> out) {
         if (node == null) {
             return;
@@ -102,23 +127,38 @@ public class TreeTraversal {
         out.add(node.val);
         inorder(node.right, out);
     }
+
+    public static void main(String[] args) {
+        TreeNode root = BstOps.insert(null, 5);
+        for (int v : new int[] {3, 8, 1, 4}) {
+            BstOps.insert(root, v);
+        }
+        List<Integer> out = new ArrayList<>();
+        inorder(root, out);
+        System.out.println(out);   // [1, 3, 4, 5, 8]
+    }
 }
 ```
 
-An iterative version uses an explicit stack. It walks left as far as it can, then visits a node and moves to its right child.
+An iterative version uses an explicit stack. It walks left as far as it can, visits a node, and then moves to the node's right child.
 
 ```java
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class IterativeInorder {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static List<Integer> inorderIterative(TreeNode root) {
         List<Integer> out = new ArrayList<>();
         Deque<TreeNode> stack = new ArrayDeque<>();
@@ -137,20 +177,25 @@ public class IterativeInorder {
 }
 ```
 
-Level-order uses a queue. Read the queue size at the start of each pass to keep the levels separate.
+Level-order uses a queue. Read the queue size at the start of each pass, so that the nodes of one level stay separate from the next level.
 
 ```java
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Queue;
+
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class LevelOrder {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static List<List<Integer>> levelOrder(TreeNode root) {
         List<List<Integer>> levels = new ArrayList<>();
         if (root == null) {
@@ -159,7 +204,7 @@ public class LevelOrder {
         Queue<TreeNode> queue = new ArrayDeque<>();
         queue.offer(root);
         while (!queue.isEmpty()) {
-            int size = queue.size();          // nodes in the current level
+            int size = queue.size();                 // nodes in the current level
             List<Integer> level = new ArrayList<>();
             for (int i = 0; i < size; i++) {
                 TreeNode node = queue.poll();
@@ -178,23 +223,27 @@ public class LevelOrder {
 }
 ```
 
-Every traversal visits each node once, so it is O(n) time. Recursive depth-first traversal uses O(h) stack space. Level-order uses O(w) queue space, where w is the widest level.
+Every traversal visits each node once, so it takes O(n) time. Recursive depth-first traversal uses O(h) stack space. Level-order uses O(w) queue space, where w is the width of the widest level.
 
 ### Morris traversal
-Morris traversal does an in-order walk with O(1) extra space. It borrows the unused `right` pointer of each node's in-order predecessor as a temporary thread back to the node, then removes that thread when it returns. The tree is restored when the traversal ends.
+
+Morris traversal performs an in-order walk with O(1) extra space. It uses the unused `right` pointer of each node's in-order predecessor as a temporary link back to the node. When the walk returns to that node, it removes the link. The tree is restored by the time the traversal ends.
 
 ```java
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class MorrisInorder {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static List<Integer> morrisInorder(TreeNode root) {
         List<Integer> out = new ArrayList<>();
         TreeNode cur = root;
@@ -208,10 +257,10 @@ public class MorrisInorder {
                     pred = pred.right;
                 }
                 if (pred.right == null) {
-                    pred.right = cur;                     // create the thread
+                    pred.right = cur;                     // create the temporary link
                     cur = cur.left;
                 } else {
-                    pred.right = null;                    // remove the thread
+                    pred.right = null;                    // remove the link
                     out.add(cur.val);
                     cur = cur.right;
                 }
@@ -222,68 +271,85 @@ public class MorrisInorder {
 }
 ```
 
-Time is O(n), because each edge is walked a constant number of times. Extra space is O(1). Use it when the interviewer asks you to avoid recursion or extra stack space, and be ready to say that it temporarily modifies the tree.
+Each edge is walked a fixed number of times, so the time is O(n). The extra space is O(1). Use Morris traversal when the interviewer asks you to avoid recursion and extra stack space. Be ready to say that it changes `right` pointers while it runs.
 
 ### Tree dynamic programming
-Many tree questions compute a value for each subtree from its children, then use it at the parent. The trick is to return one value to the parent and record a second, possibly larger, answer in a side variable. The diameter (the longest path measured in edges between any two nodes) is the standard example.
+
+Many tree questions compute one value for each subtree from its children, then combine those values at the parent. The trick is to return one value to the parent, and to record a second, possibly larger, answer in a side variable. The diameter, which is the longest path between any two nodes measured in edges, is the standard example.
 
 ```java
-import java.util.*;
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class TreeDiameter {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static int diameter(TreeNode root) {
-        int[] best = new int[1];        // side answer, updated while recursing
+        int[] best = new int[1];          // side answer, updated during the recursion
         height(root, best);
         return best[0];
     }
 
-    // Returns the number of nodes on the longest downward path from node.
+    // Returns the number of nodes on the longest downward path from node
     private static int height(TreeNode node, int[] best) {
         if (node == null) {
             return 0;
         }
         int left = height(node.left, best);
         int right = height(node.right, best);
-        best[0] = Math.max(best[0], left + right);  // edges through this node
+        best[0] = Math.max(best[0], left + right);   // edges that pass through this node
         return 1 + Math.max(left, right);
+    }
+
+    public static void main(String[] args) {
+        TreeNode root = new TreeNode(1);
+        root.left = new TreeNode(2);
+        root.right = new TreeNode(3);
+        root.left.left = new TreeNode(4);
+        System.out.println(diameter(root));   // 3, the path 4 to 2 to 1 to 3
     }
 }
 ```
 
-Each node is visited once, so the time is O(n) and the stack space is O(h).
+Each node is visited once, so the time is O(n), and the stack space is O(h).
 
 ### Path sum
-For root-to-leaf path sums, subtract the node value from the target as you descend, and check the target at a leaf.
+
+For root-to-leaf path sums, subtract each node's value from the target as you go down. At a leaf, check whether the remaining amount is zero.
 
 ```java
-import java.util.*;
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class PathSum {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static boolean hasPathSum(TreeNode node, int target) {
         if (node == null) {
             return false;
         }
         if (node.left == null && node.right == null) {
-            return node.val == target;
+            return node.val == target;      // only a leaf ends a path
         }
         int rest = target - node.val;
         return hasPathSum(node.left, rest) || hasPathSum(node.right, rest);
+    }
+
+    public static void main(String[] args) {
+        TreeNode root = new TreeNode(5);
+        root.left = new TreeNode(4);
+        root.left.left = new TreeNode(11);
+        System.out.println(hasPathSum(root, 20));   // true: 5 + 4 + 11
     }
 }
 ```
@@ -291,20 +357,21 @@ public class PathSum {
 The check must happen at a leaf. A node with only one child is not the end of a path.
 
 ### Lowest common ancestor
-In a BST, the lowest common ancestor (LCA) of two values is the first node where they split onto different sides, or the node equal to one of them. You do not need to search the whole tree.
+
+In a BST, the lowest common ancestor (LCA) of two values is the first node where the two values split onto different sides, or the node that equals one of them. You do not need to search the whole tree.
 
 ```java
-import java.util.*;
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class BstLca {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static TreeNode lcaBst(TreeNode root, int p, int q) {
         TreeNode cur = root;
         while (cur != null) {
@@ -313,7 +380,7 @@ public class BstLca {
             } else if (p > cur.val && q > cur.val) {
                 cur = cur.right;
             } else {
-                return cur;      // split point, or one value equals cur.val
+                return cur;          // the split point, or one value equals cur.val
             }
         }
         return null;
@@ -321,20 +388,20 @@ public class BstLca {
 }
 ```
 
-For a general binary tree, return the node when you find one target, and join the results from the two subtrees. This is O(n) time, O(h) stack space.
+In a general binary tree there is no ordering to use. Search both subtrees. Return a node when it is one of the targets, and return the common node when both subtrees report a target. The cost is O(n) time and O(h) stack space.
 
 ```java
-import java.util.*;
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class TreeLca {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static TreeNode lca(TreeNode root, TreeNode p, TreeNode q) {
         if (root == null || root == p || root == q) {
             return root;
@@ -342,28 +409,33 @@ public class TreeLca {
         TreeNode left = lca(root.left, p, q);
         TreeNode right = lca(root.right, p, q);
         if (left != null && right != null) {
-            return root;        // targets found on different sides
+            return root;            // the targets were found on different sides
         }
         return (left != null) ? left : right;
     }
 }
 ```
 
-### Serialisation
-Serialisation turns a tree into a string so that it can be stored or sent, then rebuilt. Pre-order with a marker for `null` is enough to rebuild a unique tree, because the marker records where each subtree ends.
+### Serialization
+
+Serialization turns a tree into a string that can be stored or sent, and deserialization rebuilds the tree from that string. Pre-order traversal with a marker for `null` is enough to rebuild a unique tree, because the markers show where each subtree ends.
 
 ```java
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.List;
+
+class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int val) {
+        this.val = val;
+    }
+}
 
 public class TreeSerialize {
-    static class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-        TreeNode(int val) { this.val = val; }
-    }
-
-
     static String serialize(TreeNode root) {
         StringBuilder sb = new StringBuilder();
         serializeHelper(root, sb);
@@ -395,56 +467,120 @@ public class TreeSerialize {
         node.right = build(tokens);
         return node;
     }
+
+    public static void main(String[] args) {
+        TreeNode root = new TreeNode(2);
+        root.left = new TreeNode(1);
+        root.right = new TreeNode(3);
+        String s = serialize(root);
+        System.out.println(s);                              // 2,1,#,#,3,#,#,
+        System.out.println(serialize(deserialize(s)).equals(s));   // true
+    }
 }
 ```
 
-Both directions are O(n) time. Note that `List.of` requires Java 9 or later and rejects `null` elements, which `split` never produces.
+Both directions take O(n) time. `List.of` rejects `null` elements, and `split` never produces `null`, so the call is safe here.
 
 ### Balanced trees and other tree types
-A plain BST has no guarantee on height, so production code uses self-balancing trees.
 
-- **AVL trees** keep the heights of the two subtrees of every node within one of each other. Lookups are O(log n).
-- **Red-black trees** use node colours and rotations to keep the tree balanced. Java's `TreeMap` and `TreeSet` are backed by a red-black tree, so their operations are O(log n).
-- **B-trees** store many keys per node to reduce disk reads. Database indexes commonly use this design.
-- **Tries** store strings by character, one level per character. Lookups cost O(L) for a string of length L, independent of how many strings are stored.
+A plain BST gives no guarantee about its height, so production code uses self-balancing trees.
+
+- **AVL trees** keep the heights of the two subtrees of every node within one of each other. Lookups take O(log n).
+- **Red-black trees** use node colors and rotations to stay balanced. Java's `TreeMap` and `TreeSet` are built on a red-black tree, so their operations take O(log n).
+- **B-trees** store many keys in each node to reduce disk reads. Database indexes often use this design.
+- **Tries** store strings one character per level. A lookup costs O(L) for a string of length L, no matter how many strings are stored (see [Heaps and Tries](heaps-and-tries.md)).
 - **Segment trees** answer range queries and point updates in O(log n).
 
-You will rarely implement these in an interview. Know what problem each one solves and what its operations cost.
+You will rarely implement these from scratch in an interview. Know which problem each one solves and what its operations cost.
 
-## How it works / Step by step
+### Worked example: building a BST and reading it back
 
-1. Decide whether the tree is a BST. If it is, use the ordering to skip subtrees.
-2. Ask what the parent needs from each child. If the answer is a single number, return it. If the question asks for a global best, record it in a side variable.
-3. Write the base case first: `null` is the usual leaf boundary.
-4. Use recursion for clear code and an explicit stack or queue when the depth may be large.
-5. Test with an empty tree, one node, a skewed tree, and a balanced tree. The skewed case often exposes wrong complexity claims.
+Insert `5, 3, 8, 1, 4` in that order. The tree has 5 at the root, 3 and 8 below it, then 1 and 4 under 3.
 
-| Operation | Balanced tree | Skewed tree |
-|---|---|---|
-| BST search, insert, delete | O(log n) | O(n) |
-| Full traversal | O(n) | O(n) |
-| Recursive stack depth | O(log n) | O(n) |
+```mermaid
+graph TD
+    R[5] --> A[3]
+    R --> B[8]
+    A --> C[1]
+    A --> D[4]
+```
 
-## Common pitfalls
+Each insert follows one path from the root. Searching for 4 visits 5, then 3, then 4, which is three comparisons on a tree of height 2. In-order traversal visits 1, 3, 4, 5, 8, which is the sorted order of the values.
 
-- Stating BST operations as O(log n) without saying the tree is balanced. The correct bound is O(h).
-- Checking for a path sum at a node with one child, which is not a leaf.
-- Calling `root.left.val` without a `null` check.
-- Mixing up height and depth. Height is measured from a node down to its deepest leaf. Depth is measured from the root down to the node.
-- Using recursion on a very deep, skewed tree and causing a `StackOverflowError`. Switch to an explicit stack when the depth can be large.
-- Comparing `TreeNode` values with `==` when the problem asks for equal values. Compare `val` fields instead.
-- Forgetting that Morris traversal changes `right` pointers while it runs.
+### Complexity
+
+| Operation | Balanced tree | Skewed tree | Notes |
+|---|---|---|---|
+| BST search, insert, delete | O(log n) | O(n) | Cost is O(h) |
+| Full traversal (any order) | O(n) | O(n) | Each node visited once |
+| Recursive stack depth | O(log n) | O(n) | Depth equals height |
+| LCA in a BST | O(log n) | O(n) | Walk from the root |
+| LCA in a general tree | O(n) | O(n) | Visit each node once |
+| Morris in-order traversal | O(n) | O(n) | O(1) extra space |
+| Serialize or deserialize | O(n) | O(n) | Output size is n markers |
+
+```mermaid
+flowchart TD
+    A[Start at the root] --> B{Value equals node}
+    B -- yes --> C[Found]
+    B -- no --> D{Value is smaller}
+    D -- yes --> E[Go left]
+    D -- no --> F[Go right]
+    E --> G{Child exists}
+    F --> G
+    G -- yes --> B
+    G -- no --> H[Not found]
+```
+
+## Where it is used
+
+- **Databases** use B-trees for indexes, so a lookup reads only a few disk pages.
+- **Java collections** use red-black trees for `TreeMap` and `TreeSet`.
+- **File systems and XML or JSON parsers** represent nested data as trees.
+- **Compilers** build syntax trees from source code.
+- **Search and autocomplete** use tries for prefix queries.
+
+## Benefits
+
+- **Ordered data.** A BST keeps keys sorted, and in-order traversal reads them back in order.
+- **Natural recursion.** Many problems split into a root and two smaller subtrees.
+- **Logarithmic lookups.** A balanced tree finds a value in O(log n) comparisons.
+- **Flexible shapes.** Trees express hierarchies such as folders, menus, and expression syntax.
+
+## Cons and limits
+
+- **Height decides speed.** An unbalanced BST degrades to O(n).
+- **Recursion depth.** A deep, skewed tree can overflow the call stack.
+- **Pointer-heavy.** Each node adds references, which costs memory and cache locality.
+- **Balancing adds complexity.** Self-balancing trees are harder to write and to debug.
+
+## Best practices
+
+- State tree costs in terms of the height h. Give the balanced and the skewed case when the input is not guaranteed to be random.
+- Write the base case first. `null` is the usual boundary.
+- Ask what the parent needs from each child. If it needs one number, return it. If the question asks for a global best, record it in a side variable.
+- Check `root.left != null` before reading `root.left.val`.
+- Use an explicit stack or queue when the tree may be very deep.
+- Compare values with `val` when the problem asks about values. Comparing node references checks identity.
+- Do not confuse height with depth. Height is measured from a node down to its deepest leaf. Depth is measured from the root down to a node.
+- Test with an empty tree, one node, a skewed tree, and a balanced tree. The skewed case often reveals a wrong complexity claim.
 
 !!! tip "Interview tip"
-    **Q: How would you find the lowest common ancestor of two nodes in a binary search tree and in a general binary tree?**
-    A: In a BST, walk from the root. If both values are smaller than the current node, go left. If both are larger, go right. Otherwise the current node is the answer, in O(h) time and O(1) extra space. In a general tree, there is no ordering, so recurse into both subtrees and return the node where the two results meet, in O(n) time.
+    **Q: How would you find the lowest common ancestor in a binary search tree and in a general binary tree?**
+    In a BST, start at the root. If both values are smaller than the current node, go left. If both are larger, go right. Otherwise the current node is the answer, in O(h) time and O(1) extra space. A general tree has no ordering, so recurse into both subtrees and return the node where the two results meet, in O(n) time.
 
 ## Quick recap
 
 - A BST operation costs O(h). Only a balanced tree gives O(log n).
-- Pre-order, in-order, post-order, and level-order cover all standard traversals, each in O(n) time.
-- Morris traversal does an in-order walk in O(1) extra space by temporarily threading the tree.
+- Pre-order, in-order, post-order, and level-order cover the standard traversals, each in O(n) time.
+- Morris traversal performs an in-order walk in O(1) extra space by temporarily linking the tree.
 - For tree DP, return one value to the parent and keep the global answer in a side variable.
-- Serialise with pre-order and `#` markers to rebuild a unique tree.
+- Serialize with pre-order and `#` markers to rebuild the same tree.
 
-**See also:** [Arrays & Strings](arrays-strings.md), [Linked Lists](linked-lists.md), [Stacks & Queues](stacks-queues.md), [Heaps and Tries](heaps-and-tries.md), [DSA Foundations](index.md)
+## Official documentation
+
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [The Java Language Specification, Java SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [Dev.java, the Java developer site](https://dev.java/)
+
+**See also:** [Arrays and Strings](arrays-strings.md), [Linked Lists](linked-lists.md), [Stacks and Queues](stacks-queues.md), [Heaps and Tries](heaps-and-tries.md), [DSA Foundations](index.md)

@@ -1,12 +1,44 @@
 # Behavioural Design Patterns
 
-Behavioural patterns deal with how objects communicate and share responsibility. They are the patterns most likely to show up in day-to-day code: event listeners, undo buttons, pluggable algorithms, and request pipelines all use them.
+Behavioural patterns deal with how objects communicate and share responsibility. They are the patterns most likely to appear in everyday code: event listeners, undo buttons, pluggable algorithms, and request pipelines all use them.
 
-## Core concepts
+!!! note "In simple words"
+    Behavioural patterns decide who does what and who tells whom. A request can be passed along a line of helpers, a change can be announced to many listeners, and an action can be saved and replayed later.
+
+## Why it matters
+
+Much of the difficulty in a system is not the data but the flow of control: which code runs when, who gets notified, and what happens when something changes. Behavioural patterns name these flows, so a team can talk about them and change them safely. Without them, control logic tends to pile up in one large method with many `if` branches.
+
+## How it works
+
+### Shape of the common behaviour patterns
+
+Many behavioural patterns have a caller that holds a reference to an interface, and several implementations that carry out the work. The class diagram below shows Strategy, which is the simplest case. Observer and Command have the same kind of shape with different roles.
+
+```mermaid
+classDiagram
+    class Context {
+        -strategy Strategy
+        +execute() void
+    }
+    class Strategy {
+        <<interface>>
+        +run(input double) double
+    }
+    class FixedRate {
+        +run(input double) double
+    }
+    class Clearance {
+        +run(input double) double
+    }
+    Context --> Strategy : uses
+    Strategy <|.. FixedRate
+    Strategy <|.. Clearance
+```
 
 ### Chain of Responsibility
 
-A request passes along a chain of handlers. Each handler either deals with the request or passes it to the next one. The sender does not need to know which handler will process it. Servlet filters and Spring Security's filter chain follow this shape.
+A request passes along a chain of handlers. Each handler either deals with the request or passes it to the next one. The sender does not need to know which handler will process it. Servlet filters and Spring Security's filter chain follow this shape. The sample below compiles with Java 21:
 
 ```java
 abstract class SupportHandler {
@@ -42,15 +74,36 @@ class Engineer extends SupportHandler {
     @Override boolean canHandle(int severity) { return severity <= 4; }
     @Override String name() { return "Engineer"; }
 }
+
+class ChainDemo {
+    public static void main(String[] args) {
+        SupportHandler first = new FirstLine();
+        first.setNext(new Engineer());
+        first.handle(3); // Engineer handled severity 3
+    }
+}
 ```
 
-Build the chain with `first.setNext(new Engineer())`, then call `first.handle(3)`. The request ends at the engineer.
+The chain can also end with a handler that always accepts. Without one, a request that nobody accepts disappears silently, as the last branch above shows.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant First as First line
+    participant Eng as Engineer
+    Client->>First: handle severity 3
+    First->>Eng: cannot handle, pass on
+    Eng->>Client: handled
+```
 
 ### Command
 
-A command turns a request into an object. That object can be stored, queued, logged, or undone later. Runnable and Callable are simple forms of this. Undo support adds an `undo()` method.
+A command turns a request into an object. That object can be stored, queued, logged, or undone later. `Runnable` and `Callable` are simple forms of this idea. Adding an `undo()` method supports undo. The sample below compiles with Java 21:
 
 ```java
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 interface Command {
     void execute();
     void undo();
@@ -79,13 +132,35 @@ class TurnOnLight implements Command {
         light.off();
     }
 }
+
+class CommandHistory {
+
+    private final Deque<Command> done = new ArrayDeque<>();
+
+    void run(Command command) {
+        command.execute();
+        done.push(command);
+    }
+
+    void undoLast() {
+        if (!done.isEmpty()) {
+            done.pop().undo();
+        }
+    }
+
+    public static void main(String[] args) {
+        CommandHistory history = new CommandHistory();
+        history.run(new TurnOnLight(new Light()));
+        history.undoLast(); // Light on, then Light off
+    }
+}
 ```
 
-An invoker (a button, a menu, a job queue) stores commands in a list. Undo is then "pop the last command and call `undo()`".
+An invoker, such as a button, a menu, or a job queue, stores commands in a list. Undo is then "pop the last command and call `undo()`".
 
 ### Interpreter
 
-An interpreter defines a grammar as a set of classes, where each class knows how to evaluate one kind of expression. It suits small languages, such as rule expressions or arithmetic formulas. For large grammars, a parser generator is a better tool.
+An interpreter defines a grammar as a set of classes, where each class knows how to evaluate one kind of expression. It suits small languages, such as rule expressions or arithmetic formulas. For a large grammar, a parser generator is a better tool. The sample below compiles with Java 21:
 
 ```java
 interface Expr {
@@ -106,12 +181,17 @@ record Add(Expr left, Expr right) implements Expr {
     }
 }
 
-// new Add(new Num(2), new Add(new Num(3), new Num(4))).eval() returns 9
+class InterpreterDemo {
+    public static void main(String[] args) {
+        Expr expr = new Add(new Num(2), new Add(new Num(3), new Num(4)));
+        System.out.println(expr.eval()); // 9
+    }
+}
 ```
 
 ### Iterator
 
-An iterator gives sequential access to a collection without exposing its internal structure. In Java, `Iterator` and `Iterable` are the standard form, and the enhanced `for` loop uses them. Iterators are not thread-safe, and `ConcurrentModificationException` is thrown when a fail-fast iterator sees a change.
+An iterator gives sequential access to a collection without exposing its internal structure. In Java, `Iterator` and `Iterable` are the standard form, and the enhanced `for` loop uses them. Iterators are not thread-safe. A fail-fast iterator throws `ConcurrentModificationException` when it sees the collection change underneath it. The sample below compiles with Java 21:
 
 ```java
 import java.util.Iterator;
@@ -140,13 +220,18 @@ class Countdown implements Iterable<Integer> {
             }
         };
     }
+
+    public static void main(String[] args) {
+        for (int n : new Countdown(3)) {
+            System.out.println(n); // 3, 2, 1
+        }
+    }
 }
-// for (int n : new Countdown(3)) prints 3, 2, 1
 ```
 
 ### Mediator
 
-A mediator is the object that coordinates communication between peers. The peers talk to the mediator, not to each other, so adding a peer does not require changes to every other peer. An air traffic control tower and a chat room server both play this role.
+A mediator coordinates communication between peers. The peers talk to the mediator and not to each other, so adding a peer does not require changes to every other peer. An air traffic control tower and a chat room server both play this role. The sample below compiles with Java 21:
 
 ```java
 import java.util.ArrayList;
@@ -192,7 +277,7 @@ class User {
 
 ### Memento
 
-A memento captures an object's state so it can be restored later, without exposing the object's fields to the caller. The originator creates the memento, and a caretaker stores it.
+A memento captures an object's state so it can be restored later, without exposing the object's fields to the caller. The originator creates the memento, and a caretaker stores it. The sample below compiles with Java 21:
 
 ```java
 class Editor {
@@ -215,17 +300,17 @@ class Editor {
         this.text = memento.text();
     }
 
-    // Records are implicitly static, so the memento does not hold a reference to the editor
+    // Records are implicitly static, so the memento holds no reference to the editor.
     record Memento(String text) {
     }
 }
 ```
 
-The caretaker keeps a `Deque<Editor.Memento>` for undo history. Snapshots of large state can use a lot of memory, so store only what you need to restore.
+The caretaker keeps a `Deque<Editor.Memento>` as its undo history. Snapshots of large state use a lot of memory, so store only what restoring needs.
 
 ### Observer
 
-An observer lets one subject notify a set of listeners when its state changes. The subject knows only the listener interface, so listeners can be added or removed without changing the subject. Event listeners in Swing, JavaBeans, and most UI frameworks use this shape. Messaging systems apply the same idea across processes.
+An observer lets one subject notify a set of listeners when its state changes. The subject knows only the listener interface, so listeners can be added or removed without changing the subject. Event listeners in Swing, JavaBeans, and most UI frameworks use this shape. Messaging systems apply the same idea across processes. The sample below compiles with Java 21:
 
 ```java
 import java.util.List;
@@ -237,7 +322,7 @@ interface PriceListener {
 
 class PriceFeed {
 
-    // CopyOnWriteArrayList lets listeners subscribe while a publish is running
+    // CopyOnWriteArrayList lets listeners subscribe while a publish is running.
     private final List<PriceListener> listeners = new CopyOnWriteArrayList<>();
 
     void subscribe(PriceListener listener) {
@@ -258,11 +343,20 @@ class PriceFeed {
 }
 ```
 
+```mermaid
+sequenceDiagram
+    participant Feed as PriceFeed
+    participant A as Listener A
+    participant B as Listener B
+    Feed->>A: onPriceChanged ACME 42.5
+    Feed->>B: onPriceChanged ACME 42.5
+```
+
 `java.util.Observable` and `Observer` were deprecated in Java 9. Write a small interface like the one above, or use `PropertyChangeSupport` from `java.beans` for bean-style properties.
 
 ### State
 
-A state object holds the behaviour for one state of an object, and the context delegates to whichever state is current. Unlike Strategy, the states usually change each other. A traffic light is a good example. An enum with constant-specific bodies is a compact way to write it.
+A state object holds the behaviour for one state of an object. The context delegates to whichever state is current. Unlike Strategy, the states usually change each other. A traffic light is a good example. An enum with constant-specific bodies is a compact way to write it. The sample below compiles with Java 21:
 
 ```java
 enum TrafficLight {
@@ -290,11 +384,19 @@ enum TrafficLight {
 }
 ```
 
-Calling `TrafficLight.RED.next()` returns `GREEN`. Each state decides the transition, and the enum's constants are the states.
+`TrafficLight.RED.next()` returns `GREEN`. Each state decides the transition, and the enum constants are the states.
+
+```mermaid
+stateDiagram-v2
+    [*] --> RED
+    RED --> GREEN
+    GREEN --> YELLOW
+    YELLOW --> RED
+```
 
 ### Strategy
 
-A strategy is an interchangeable algorithm behind an interface. The caller picks the strategy, and the context uses it without knowing the details. In modern Java, a strategy is often a lambda. `Comparator` is a strategy for sorting.
+A strategy is an interchangeable algorithm behind an interface. The caller picks the strategy, and the context uses it without knowing the details. In modern Java a strategy is often a lambda. `Comparator` is a strategy for sorting. The sample below compiles with Java 21:
 
 ```java
 interface DiscountPolicy {
@@ -324,7 +426,7 @@ class Checkout {
 
 ### Template Method
 
-A template method defines the skeleton of an algorithm in a base class, and subclasses fill in some steps. The base method is usually `final` so subclasses cannot reorder the steps. `HttpServlet` and `AbstractList` use this idea.
+A template method defines the skeleton of an algorithm in a base class, and subclasses fill in some steps. The template method is usually `final`, so subclasses cannot reorder the steps. `HttpServlet` and `AbstractList` use this idea. The sample below compiles with Java 21:
 
 ```java
 abstract class ReportGenerator {
@@ -355,7 +457,7 @@ class SalesReport extends ReportGenerator {
 
 ### Visitor
 
-A visitor adds new operations to a fixed set of classes without changing them. Each element accepts a visitor and calls the visitor method that matches its type. The price is that adding a new element type requires changing every visitor. Use this when the set of types is stable and the operations change often.
+A visitor adds new operations to a fixed set of classes without changing them. Each element accepts a visitor and calls the visitor method that matches its type. The price is that adding a new element type requires changing every visitor. Use this pattern when the set of types is stable and the operations change often. The sample below compiles with Java 21:
 
 ```java
 interface ShapeVisitor<R> {
@@ -394,17 +496,17 @@ class AreaVisitor implements ShapeVisitor<Double> {
 }
 ```
 
-Java 21's pattern matching for `switch` often replaces a visitor when the hierarchy is sealed. The visitor is still the right choice when the operations belong to a separate concern and must be defined from outside the types.
+Pattern matching for `switch`, available since Java 21, often replaces a visitor when the hierarchy is sealed. A visitor is still the right choice when the operations belong to a separate concern and must be defined outside the types.
 
-## How it works / Step by step
+### Step by step
 
 | Pattern | Who decides what happens | Typical Java example |
 |---------|-------------------------|----------------------|
 | Chain of Responsibility | Each handler, one at a time | Servlet filters, Spring Security filters |
 | Command | The command object, when executed | `Runnable`, job queues, undo stacks |
 | Interpreter | Expression classes | Small rule or formula evaluators |
-| Iterator | The iterator, step by step | `Iterable` and enhanced `for` |
-| Mediator | The mediator, between peers | Chat rooms, message brokers within a process |
+| Iterator | The iterator, step by step | `Iterable` and the enhanced `for` loop |
+| Mediator | The mediator, between peers | Chat rooms, message routing inside a process |
 | Memento | The originator restores its own snapshot | Undo history in editors |
 | Observer | Each listener, on notification | Event listeners, JavaBeans property change events |
 | State | The current state object | Order status flows, traffic light cycles |
@@ -412,30 +514,75 @@ Java 21's pattern matching for `switch` often replaces a visitor when the hierar
 | Template Method | The base class order, subclass steps | `AbstractList`, `HttpServlet` |
 | Visitor | The visitor, per element type | Compiler AST passes |
 
-## Common pitfalls
+To choose a behavioural pattern, start from the question the code is asking:
 
-- **Chain with no terminal handler.** If no handler accepts the request, it disappears silently. Decide what the end of the chain does.
-- **Observers that throw.** One listener's exception can stop the notification loop for the rest. Catch and log per listener if that matters.
-- **Mutating a list during iteration.** Use a concurrent list, or copy the listeners before the loop.
-- **Strategy and State mixed up.** Strategy is chosen from outside and usually does not change the context's mode. State changes itself over time.
-- **Visitor everywhere.** Each new element type touches every visitor. Use it only where the type set is stable.
-- **Memento leaking internals.** If the memento exposes the object's fields, callers can change them. Keep it opaque or immutable.
+```mermaid
+flowchart TB
+    A[Behaviour to design] --> B{Who passes the request}
+    B -->|a line of handlers| C[Chain of Responsibility]
+    B -->|one object notifies many| D[Observer]
+    B -->|action must be stored or undone| E[Command]
+    B -->|algorithm chosen from outside| F[Strategy]
+    B -->|object changes its own mode| G[State]
+    B -->|fixed steps with custom parts| H[Template Method]
+```
+
+## Where it is used
+
+- Servlet filters and Spring Security filter chains, which pass each request through a series of handlers.
+- Event listeners in GUI toolkits and in JavaBeans.
+- Undo and redo in editors, drawing tools, and form builders.
+- Job queues and task schedulers, which store commands for later execution.
+- Sorting with `Comparator`, and payment or pricing rules chosen per request.
+- Order and workflow status machines, where each state knows what can come next.
+
+## Benefits
+
+- Control flow becomes explicit. Each pattern gives a name to a decision.
+- New handlers, listeners, strategies, or states can be added without editing the core.
+- Commands and mementos make undo and replay possible.
+- Iterators hide the storage structure, so the collection can change without affecting callers.
+- Template methods keep an algorithm's order fixed in one place.
+
+## Cons and limits
+
+- Chains with no terminal handler can drop requests without any error.
+- Observers run in sequence, so one slow or failing listener can delay or stop the others.
+- Visitors are costly to extend when a new element type appears.
+- Mementos can use a lot of memory when the state is large.
+- Too many small classes can make a simple flow harder to follow than a plain `switch`.
+
+## Best practices
+
+- Decide what happens at the end of a chain, and log requests that no handler accepts.
+- Catch and log exceptions per listener when one failure must not stop the rest.
+- Use a concurrent list, or copy the listeners before notifying, when subscriptions can change during a publish.
+- Use Strategy when the client picks behaviour and it stays fixed. Use State when the object moves between modes itself.
+- Keep a memento opaque or immutable, so callers cannot change the saved state.
+- Use a visitor only where the set of element types is stable.
 
 !!! tip "Interview tip"
-    "Strategy and State have the same class diagram. What is the difference?" Strategy is picked by the client and stays fixed for a use case. State is changed by the object itself as it moves between modes, and each state knows the next state.
+    **Q: Strategy and State have the same class diagram. What is the difference?**
+    Strategy is picked by the client and usually stays fixed for a use case. State is changed by the object itself as it moves between modes, and each state knows the next one.
 
 ## Quick recap
 
-- Chain of Responsibility: pass a request along until one handler takes it.
-- Command: wrap an action in an object so it can be queued or undone.
-- Interpreter: evaluate a small grammar with one class per rule.
-- Iterator: walk a collection without exposing its structure.
-- Mediator: route communication through one coordinator.
-- Memento: save and restore state without exposing internals.
-- Observer: notify subscribers when a subject changes.
-- State: let an object change its behaviour as its state changes.
-- Strategy: swap an algorithm behind an interface, often with a lambda.
-- Template Method: fix the algorithm's order in a base class.
-- Visitor: add operations to a stable set of types.
+- Chain of Responsibility passes a request along until one handler takes it.
+- Command wraps an action in an object so it can be queued or undone.
+- Interpreter evaluates a small grammar with one class per rule.
+- Iterator walks a collection without exposing its structure.
+- Mediator routes communication through one coordinator.
+- Memento saves and restores state without exposing internals.
+- Observer notifies subscribers when a subject changes.
+- State lets an object change its behaviour as its state changes.
+- Strategy swaps an algorithm behind an interface, often with a lambda.
+- Template Method fixes the order of an algorithm in a base class.
+- Visitor adds operations to a stable set of types.
+
+## Official documentation
+
+- [java.util.concurrent package summary (JDK 21)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html)
+- [JDK 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [Spring Security reference documentation](https://docs.spring.io/spring-security/reference/index.html)
 
 **See also:** [Creational Patterns](creational-patterns.md), [Structural Patterns](structural-patterns.md), [SOLID and Anti-Patterns](solid-and-anti-patterns.md), [Design Patterns interview questions](../../interview-questions/technical/design-patterns-part-1.md)

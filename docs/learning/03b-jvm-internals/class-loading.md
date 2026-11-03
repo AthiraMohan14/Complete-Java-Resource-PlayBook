@@ -1,28 +1,31 @@
 # Class Loading
 
-Class loading is the process that turns a `.class` file into a `Class` object the JVM can use. Interviewers ask about it to check whether you understand the class loader hierarchy, why the same class name can behave differently in two loaders, and why you see `ClassNotFoundException` in one place and `NoClassDefFoundError` in another.
+!!! note "In simple words"
+    Class loading is how the JVM finds a class file, reads it, and makes it ready to use. Each class is loaded by a class loader, and the loaders form a chain that asks the parent first.
 
----
+## Why it matters
 
-## Core concepts
+Class loading decides which version of a class your code really uses. It also explains two errors that look alike but mean different things: `ClassNotFoundException` and `NoClassDefFoundError`. Plug-in systems, application servers, and redeployed web apps all depend on how loaders behave, so these details come up often in senior interviews.
+
+## How it works
 
 ### The class lifecycle
 
-A class goes through these phases before its code runs:
+A class goes through three phases before its code can run.
 
-1. **Loading:** a class loader finds the bytes (from a jar, a directory, the network, or generated code) and creates a `Class` object.
-2. **Linking:** three steps:
-   - **Verification** checks that the bytecode is safe (types match, no illegal jumps, stack is consistent).
-   - **Preparation** allocates static fields and sets them to default values (`0`, `null`, `false`). Constant values are assigned here.
-   - **Resolution** replaces symbolic references (names) with direct references. It can happen lazily, when the reference is first used.
-3. **Initialisation:** static initialisers and static field assignments run, in textual order. This happens the first time the class is actively used.
+1. **Loading.** A class loader finds the bytes of the class. The source can be a jar, a directory, the network, or generated code. The loader then creates a `Class` object.
+2. **Linking.** Linking has three steps:
+   - **Verification** checks that the bytecode is safe. Types must match, jumps must stay inside the method, and the operand stack must stay consistent.
+   - **Preparation** creates the static fields and gives them default values such as `0`, `null`, or `false`. Constant values are assigned here.
+   - **Resolution** turns symbolic references, which are names, into direct references. It can happen lazily, the first time the reference is used.
+3. **Initialization.** Static initializers and static field assignments run in source order. This happens the first time the class is actively used, for example when an instance is created or a static method is called.
 
 ```java
 public class InitOrder {
     static class Config {
         static { System.out.println("Config initialised"); }
-        static final String NAME = "app";     // compile-time constant: reading it does not initialise Config
-        static int version = 1;               // ordinary static field: reading it triggers initialisation
+        static final String NAME = "app";   // compile-time constant: reading it does not initialise Config
+        static int version = 1;             // ordinary static field: reading it triggers initialisation
     }
 
     public static void main(String[] args) {
@@ -40,58 +43,58 @@ Config initialised
 Version: 1
 ```
 
-The constant `NAME` is inlined by `javac`, so the JVM never touches `Config` to read it. That surprises many people.
+`javac` copies the value of `NAME` into the code that reads it, because it is a compile-time constant. The JVM never touches `Config` to read that value, so the static block does not run until `version` is read.
 
 ### The three built-in class loaders
 
 | Loader | Java class | Loads | Parent |
 |---|---|---|---|
-| Bootstrap | (none; represented as `null`) | Core classes such as `java.lang.String` and the modules of the JDK base | None |
+| Bootstrap | None; shown as `null` | Core classes such as `java.lang.String` and the base JDK modules | None |
 | Platform | `jdk.internal.loader.ClassLoaders$PlatformClassLoader` | Platform modules such as `java.sql` | Bootstrap |
 | Application (system) | `jdk.internal.loader.ClassLoaders$AppClassLoader` | Your classes on the class path or module path | Platform |
 
-Naming history: the middle loader was called the **Extension** class loader before Java 9. Java 9 renamed it to the **Platform** class loader when the module system was introduced. Older articles and interview answers may still use the old name.
+The middle loader was called the **Extension** class loader before Java 9. Java 9 renamed it to the Platform class loader when the module system arrived. Older articles and answers may still use the old name, so mention the rename if you use it.
 
 ```java
 public class LoaderChain {
     public static void main(String[] args) {
         ClassLoader app = LoaderChain.class.getClassLoader();
-        System.out.println("Application loader: " + app);
-        System.out.println("Parent (platform): " + app.getParent());
-        System.out.println("Grandparent (bootstrap): " + app.getParent().getParent());
-        System.out.println("String is loaded by: " + String.class.getClassLoader());
+        System.out.println("Application loader is not null: " + (app != null));
+        System.out.println("Parent is the platform loader: " + (app.getParent() != null));
+        System.out.println("Grandparent is the bootstrap loader: " + (app.getParent().getParent() == null));
+        System.out.println("String is loaded by bootstrap: " + (String.class.getClassLoader() == null));
     }
 }
 ```
 
-The bootstrap loader returns `null` from `getClassLoader()`, which is why `String` shows `null`.
+The bootstrap loader returns `null` from `getClassLoader()`, which is why `String.class.getClassLoader()` is `null`.
 
 ### Parent delegation
 
-When a loader is asked for a class, it does not look first in its own location. It asks its parent, then falls back to itself. The rule:
+When a loader gets a request for a class, it does not look in its own location first. It asks its parent, and it searches its own location only if the parent cannot find the class.
 
-1. If the loader has already loaded the class, return it.
-2. Otherwise, delegate the request to the parent.
-3. If the parent cannot find it, call `findClass` on this loader.
+1. If the loader has already loaded the class, it returns that class.
+2. Otherwise it delegates the request to its parent.
+3. If the parent cannot find the class, the loader calls `findClass` on itself.
 
-This means core classes such as `java.lang.String` always come from the bootstrap loader. A user cannot replace them by putting a class with the same name on the class path, which protects the platform.
+Because of this order, core classes such as `java.lang.String` always come from the bootstrap loader. Application code cannot replace them by putting a class with the same name on the class path. That protects the platform from accidental or deliberate replacement.
 
 ```mermaid
 flowchart TD
-    A[Request for class X] --> B{Already loaded by this loader?}
+    A[Request for class X] --> B{Already loaded here}
     B -- yes --> Z[Return the Class]
     B -- no --> C[Delegate to parent loader]
-    C --> D{Parent finds X?}
+    C --> D{Parent finds X}
     D -- yes --> Z
     D -- no --> E[Call findClass on this loader]
-    E --> F{Found?}
+    E --> F{Found}
     F -- yes --> Z
     F -- no --> G[ClassNotFoundException]
 ```
 
 ### Writing a custom class loader
 
-You rarely need a custom loader, but application servers, plug-in systems, and test frameworks use them. The usual pattern is to override `findClass` and leave delegation in place.
+Most applications never need a custom loader. Application servers, plug-in systems, and test frameworks do use them. The usual approach is to override `findClass` and keep the default delegation.
 
 ```java
 import java.io.IOException;
@@ -119,67 +122,105 @@ public class DirectoryClassLoader extends ClassLoader {
 }
 ```
 
-Because the parent is asked first, `findClass` runs only for classes that the parent cannot find. A class loaded by this loader is a different `Class` object from the same-named class loaded by another loader, even though the bytes are identical.
+The parent is asked first, so `findClass` runs only for classes the parent cannot find. A class defined by this loader is a different `Class` object from a class with the same name defined elsewhere, even when the bytes are identical.
 
-### Namespaces: same name, different class
+### Same name, different class
 
-The identity of a runtime class is the pair (fully qualified name, defining class loader). Two loaders can define `com.example.Plugin` and get two unrelated classes. Casting one to the other throws `ClassCastException`, even though the names match. This is the most common source of confusing errors in plug-in and redeploy scenarios.
+The identity of a runtime class is the pair of its fully qualified name and its defining class loader. Two loaders can each define `com.example.Plugin`, and the JVM treats them as two unrelated classes. Casting one to the other throws `ClassCastException`, even though the names match. This is the most common source of confusing errors in plug-in systems and in redeployed applications.
 
 ### Errors you will see
 
-| Exception | When | Typical cause |
+| Exception | When it happens | Typical cause |
 |---|---|---|
-| `ClassNotFoundException` | Loading by name fails (`Class.forName`, `loader.loadClass`) | A class is missing from the class path at runtime |
-| `NoClassDefFoundError` | A class was present at compile time but is missing or failed to initialise at runtime | Missing jar in the run configuration, or an exception in a static initialiser |
-| `ExceptionInInitializerError` | A static initialiser threw an exception | Bad static configuration or a missing resource |
-| `UnsatisfiedLinkError` | A native method cannot be linked | Missing native library |
+| `ClassNotFoundException` | A lookup by name fails (`Class.forName` or `loader.loadClass`) | The class is missing from the class path at run time |
+| `NoClassDefFoundError` | The class existed at compile time but is missing or failed to initialize at run time | A jar is missing from the run configuration, or a static initializer threw an exception |
+| `ExceptionInInitializerError` | A static initializer threw an exception | Bad static configuration or a missing resource |
+| `UnsatisfiedLinkError` | A native method cannot be linked | The native library is missing |
 
-`ClassNotFoundException` is a checked exception. `NoClassDefFoundError` is an `Error`, so you should not catch it in normal code.
+`ClassNotFoundException` is a checked exception that you can catch. `NoClassDefFoundError` is an `Error`, and normal code should not catch it.
 
-### Loading without initialising
+### Loading without initializing
 
-`Class.forName(name)` loads and initialises the class. The overload with `false` loads and links it without running static initialisers:
+`Class.forName(name)` loads, links, and initializes the class. The three-argument form lets you choose whether to initialize it:
 
 ```java
-Class<?> c = Class.forName("java.sql.Driver", false, ClassLoader.getSystemClassLoader());
+public class LoadNoInit {
+    public static void main(String[] args) throws ClassNotFoundException {
+        Class<?> c = Class.forName("java.sql.Driver", false, ClassLoader.getSystemClassLoader());
+        System.out.println("Loaded without initializing: " + c.getName());
+    }
+}
 ```
 
-JDBC drivers used to rely on this kind of static initialisation to register themselves. Modern drivers use the service loader instead (see the [Java Tools and Utilities](../03c-tooling-utilities/java-tools-utilities.md) notes for how modules expose services).
+Old JDBC drivers relied on a static initializer to register themselves. Modern drivers use the service loader mechanism instead (see the [Java Tools and Utilities](../03c-tooling-utilities/java-tools-utilities.md) notes for how modules expose services).
 
----
+### Step by step: what happens at start-up
 
-## How it works / Step by step
+1. The JVM starts and creates the bootstrap loader, which loads the core classes.
+2. The platform loader and the application loader are created. The application loader's class path comes from `-cp` or from the jar manifest.
+3. `main` is requested through the application loader. That loader delegates upward first, and then loads the class itself.
+4. When code first refers to another class, the same steps run again. Loading and linking happen first, and initialization runs the static initializers.
+5. A loaded class stays in memory as long as its loader is reachable. A loader can be garbage collected only when none of its classes or objects are still reachable.
 
-1. The JVM starts and creates the bootstrap loader, which loads core classes.
-2. The platform and application loaders are created. The application loader's class path comes from `-cp` or the manifest.
-3. `main` is requested through the application loader. It delegates upward first, then loads the class itself.
-4. When code first refers to another class, the same process runs. Loading and linking happen, then initialisation runs the static initialisers.
-5. Loaded classes stay in the loader until it is garbage collected. A loader is collected only when none of its classes or objects are reachable.
+```mermaid
+flowchart LR
+    A[Bootstrap loader] --> B[Platform loader]
+    B --> C[Application loader]
+    C --> D[Your classes]
+    C -. asks first .-> B
+    B -. asks first .-> A
+```
 
----
+## Where it is used
 
-## Common pitfalls
+- **Application servers and web containers** give each deployed web app its own class loader, so two apps can use different versions of the same library.
+- **Plug-in and extension systems** load optional modules from a folder at run time.
+- **Test frameworks** create loaders to isolate test classes or to reload changed classes.
+- **Build and code generation tools** define classes in memory from generated bytes.
 
-- Expecting a class in your jar to override a JDK class. Parent delegation prevents it. Core packages such as `java.*` cannot be replaced this way.
-- Treating `ClassNotFoundException` and `NoClassDefFoundError` as the same. One is a failed lookup by name; the other is a missing class during execution after compilation succeeded.
-- Assuming that reading a `static final` constant initialises the class. Compile-time constants are inlined.
-- Redeploying a web app without releasing the old class loader. Threads, `ThreadLocal`s, or static caches keep the old classes alive and leak Metaspace.
-- Comparing classes from two loaders with `==` or casting them, then being surprised by `ClassCastException`.
-- Using the old name "Extension class loader" in a Java 9+ discussion without explaining the rename.
+## Benefits
+
+- **Lazy loading.** Classes load only when they are first needed, which keeps start-up fast for large applications.
+- **Isolation.** Separate loaders can keep different versions of one library apart.
+- **Platform safety.** Parent delegation keeps core classes consistent and blocks accidental replacement.
+- **Dynamic extension.** New code can be added at run time without restarting the process.
+
+## Cons and limits
+
+- **Debugging is harder.** The same class name can come from two places, so a stack trace may not show which version ran.
+- **Loader leaks.** A loader stays in memory while anything refers to one of its classes. A static field, a thread, or a `ThreadLocal` can keep an old loader alive.
+- **Casts across loaders fail.** Objects shared between loaders need a common interface that both loaders can see.
+- **Loading costs time.** Each class must be read, verified, and linked. This is why startup optimizations such as Class Data Sharing exist.
+
+## Best practices
+
+- Keep one version of each library on the class path, unless you deliberately isolate applications with separate loaders.
+- Share API types through a parent loader, and let each child loader supply only its own implementation.
+- When an application is redeployed, stop its threads and clear `ThreadLocal` values, so the old loader can be collected.
+- Do not expect a class in your jar to replace a JDK class such as `java.util.ArrayList`. Parent delegation prevents it.
+- Catch `ClassNotFoundException` only when you have a sensible fallback. Do not hide a missing dependency.
+- Do not read a `static final` constant in the hope that it starts a static initializer. Compile-time constants are inlined.
+- Avoid comparing classes from two loaders with `==` or by casting them. Check the loader first.
 
 !!! tip "Interview tip"
     **Q: What is parent delegation and why does Java use it?**
-    Before a loader defines a class, it asks its parent to load it. The request goes up to the bootstrap loader first, and each loader only tries its own location when the parent cannot find the class. This keeps core classes such as `java.lang.String` consistent across the application and stops user code from replacing them by accident or on purpose.
+    Before a loader defines a class, it asks its parent to load it. The request reaches the bootstrap loader first, and each loader searches its own location only when the parent fails. This keeps core classes such as `java.lang.String` the same everywhere and stops user code from replacing them.
 
     **Follow-up: Why does a class loaded by two loaders not match?**
-    Runtime class identity is the class name plus the defining loader. Two loaders produce two distinct `Class` objects, so casts and `instanceof` checks between them fail. This matters in plug-in systems and in redeployed web applications.
+    Runtime class identity is the class name plus the defining loader. Two loaders produce two different `Class` objects, so casts and `instanceof` checks between them fail. This matters in plug-in systems and in redeployed web applications.
 
 ## Quick recap
 
-- Class loading has three phases: loading, linking (verification, preparation, resolution), and initialisation.
-- The three built-in loaders are Bootstrap (core), Platform (formerly Extension, renamed in Java 9), and Application (your code).
-- Parent delegation asks the parent loader first, which protects core classes.
-- A class's runtime identity includes its loader, so the same name from two loaders is two different classes.
-- `ClassNotFoundException` is a failed lookup; `NoClassDefFoundError` is a class missing or broken at runtime.
+- Class loading has three phases: loading, linking (verification, preparation, resolution), and initialization.
+- The built-in loaders are Bootstrap (core), Platform (formerly Extension, renamed in Java 9), and Application (your code).
+- Parent delegation asks the parent first, which protects core classes.
+- A runtime class is identified by its name and its loader, so the same name from two loaders is two different classes.
+- `ClassNotFoundException` is a failed lookup. `NoClassDefFoundError` means a class is missing or broken at run time.
+
+## Official documentation
+
+- [The Java Language Specification, Java SE 21](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [JEP index (OpenJDK)](https://openjdk.org/jeps/)
 
 **See also:** [JVM Architecture and Memory](jvm-architecture-memory.md) (Metaspace holds loaded class metadata), [Garbage Collection](garbage-collection.md) (loader leaks), [JIT Compilation and Performance Tools](jit-and-performance-tools.md) (Class Data Sharing), [JVM Internals index](index.md)

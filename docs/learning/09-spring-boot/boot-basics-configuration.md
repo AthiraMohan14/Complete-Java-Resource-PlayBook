@@ -1,29 +1,50 @@
 # Spring Boot Basics and Configuration
 
-Spring Boot removes most of the setup that a Spring application once needed: you get a running web server, sensible defaults, and configuration read from files and the environment. Interviewers ask about this because the "magic" of auto-configuration is easy to use without understanding, and that gap shows up quickly in debugging and design questions.
+!!! note "In simple words"
+    Spring Boot starts a Spring application for you. It adds a web server, picks sensible defaults based on the libraries you include, and reads settings from files, environment variables, and the command line.
 
-## Spring versus Spring Boot
+## Why it matters
 
-Spring Boot is not a replacement for Spring. It is a layer built on the Spring Framework that makes the usual choices for you. The table below shows what changes between the two.
+Plain Spring needs a lot of setup before anything runs. Boot removes most of it, which makes applications quick to start. The risk is that auto-configuration becomes magic that nobody understands, and that gap shows up when something breaks at startup or in production. Interviewers ask about Boot to see whether you know what it decides for you, how it decides, and how to override it.
+
+## How it works
+
+Boot does its work in a fixed order when `SpringApplication.run` is called. The flowchart shows the sequence. The Spring snippets on this page show the shape of the code; they are not compiled as part of this page.
+
+1. `SpringApplication.run` creates the application context and reads the environment: command-line arguments, environment variables, property files, and active profiles.
+2. Component scanning registers your own beans, starting from the package of the main class.
+3. Auto-configuration classes are checked against their conditions. Each one that applies registers default beans, unless you already defined a bean of that type.
+4. The embedded server starts, and the application is ready to serve requests.
+
+```mermaid
+flowchart TD
+    A[SpringApplication run] --> B[Read environment and profiles]
+    B --> C[Component scan your beans]
+    C --> D[Evaluate auto-configuration conditions]
+    D --> E[Register default beans where allowed]
+    E --> F[Start embedded server]
+    F --> G[Application ready]
+```
+
+### Spring versus Spring Boot
+
+Spring Boot is not a replacement for Spring. It is a layer on top of the Spring Framework that makes common choices for you.
 
 | Topic | Spring Framework | Spring Boot |
 |---|---|---|
-| What it gives you | Dependency injection, AOP, MVC, data access, and transaction support | The same features, preconfigured for common cases |
+| What you get | Dependency injection, AOP, MVC, data access, and transactions | The same features, preconfigured for common cases |
 | Wiring | You declare beans and infrastructure yourself, in Java or XML | Auto-configuration creates default beans based on the classpath |
-| Web server | You deploy a WAR to an external servlet container | An embedded Tomcat, Jetty, or Undertow runs inside an executable JAR |
+| Web server | You deploy a WAR to an external servlet container | An embedded server runs inside an executable JAR |
 | Library versions | You choose compatible versions of each library | Starters and the parent POM or BOM align the versions |
 | Configuration | Explicit beans, plus property files you load yourself | Standard `application` files, profiles, and typed properties |
-| Operations | Health checks and metrics are your job to build | Actuator endpoints are available once you expose them |
+| Operations | You build health checks and metrics | Actuator endpoints are available once you expose them |
 | Testing | You assemble the context for each test | `@SpringBootTest` and test slices load only what a test needs |
-| Boilerplate | More setup code and descriptors | Much less, because defaults cover the common path |
 
-The short answer for an interview: Spring provides the building blocks, and Boot chooses sensible defaults for them and gets out of the way when you define your own.
-
-## Core concepts
+For an interview, the short answer is: Spring provides the building blocks, and Boot chooses defaults for them and steps aside when you define your own.
 
 ### @SpringBootApplication
 
-`@SpringBootApplication` is a convenience annotation. It combines `@Configuration` (the class can declare beans), `@EnableAutoConfiguration` (turn on auto-configuration), and `@ComponentScan` (find components in this package and below).
+`@SpringBootApplication` is a convenience annotation. It combines three others: `@Configuration` (the class can declare beans), `@EnableAutoConfiguration` (turns on auto-configuration), and `@ComponentScan` (finds components in this package and below).
 
 ```java
 import org.springframework.boot.SpringApplication;
@@ -37,63 +58,68 @@ public class OrderServiceApplication {
 }
 ```
 
-Place this class in the root package of your application. Component scanning starts from its package, so classes placed outside it are not picked up unless you configure scanning explicitly.
+Place this class in the root package of your application. Scanning starts from its package, so classes outside that tree are not found unless you configure scanning yourself.
 
 ### How auto-configuration decides
 
-Auto-configuration classes are listed in `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` in each starter jar (this file replaced the older `spring.factories` entry for these classes in Spring Boot 2.7 and later). Each candidate is guarded by conditions:
+Each starter jar lists its auto-configuration classes in `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. This file replaced the older `spring.factories` entry for these classes in Spring Boot 2.7 and later. Each candidate is guarded by conditions:
 
-- `@ConditionalOnClass`: the library is on the classpath
-- `@ConditionalOnMissingBean`: you have not defined your own bean of that type
-- `@ConditionalOnProperty`: a property is set to a given value
+- `@ConditionalOnClass`: the library is on the classpath.
+- `@ConditionalOnMissingBean`: you have not defined your own bean of that type.
+- `@ConditionalOnProperty`: a property has a given value.
 
-Because of `@ConditionalOnMissingBean`, a bean you define always wins over the default. This is the usual way to override Boot's behaviour.
+Because of `@ConditionalOnMissingBean`, a bean you define always wins over Boot's default. That is the normal way to override Boot.
 
 ```java
 import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 @Configuration
 class DataSourceOverride {
-    // Boot's DataSource auto-configuration backs off when this bean exists.
+
+    // Boot's DataSource auto-configuration backs off because this bean exists.
     @Bean
     DataSource dataSource() {
-        // return a custom, pre-configured DataSource here
-        throw new UnsupportedOperationException("sketch only");
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setUrl("jdbc:postgresql://db.example.com/orders");
+        ds.setUsername("app");
+        ds.setPassword(System.getenv("DB_PASSWORD"));   // read the secret from the environment
+        return ds;
     }
 }
 ```
 
 ### Embedded servers
 
-`spring-boot-starter-web` brings in Tomcat as the default embedded servlet container, so the application runs as a plain `java -jar`. To switch servers, exclude the Tomcat starter and add another (for example, Jetty). Undertow has been supported in older Boot lines; check the support matrix for your Boot version before choosing it, because server support changes between releases.
+`spring-boot-starter-web` brings in Tomcat as the default embedded servlet container, so the application runs with a plain `java -jar`. To use another server, exclude the Tomcat starter and add a different one, such as Jetty. Check the support matrix for your Boot version before you choose a server, because support changes between releases.
 
 ### Profiles and environment abstraction
 
-Profiles group configuration and beans per environment. Activate them with `spring.profiles.active` (or `SPRING_PROFILES_ACTIVE`). Profile-specific files such as `application-prod.yml` override the base file.
+Profiles group configuration and beans for each environment. Activate them with `spring.profiles.active` or the `SPRING_PROFILES_ACTIVE` environment variable. A profile-specific file such as `application-prod.yml` overrides the base `application.yml`.
 
 ```java
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+
+public interface PaymentGateway {
+    boolean charge(String customerId, int amountCents);
+}
 
 @Service
 @Profile("dev")
 class FakePaymentGateway implements PaymentGateway {
     @Override
     public boolean charge(String customerId, int amountCents) {
-        return true; // never call a real provider in dev
+        return true;   // never call a real provider in dev
     }
-}
-
-interface PaymentGateway {
-    boolean charge(String customerId, int amountCents);
 }
 ```
 
 ### Configuration binding
 
-`@Value` injects a single value. `@ConfigurationProperties` binds a whole group of keys to a type, which is safer and easier to test. Records work well for this in Spring Boot 3.
+`@Value` injects one value. `@ConfigurationProperties` binds a whole group of keys to a type, which is safer and easier to test. Records work well for this in Spring Boot 3.
 
 ```java
 import java.time.Duration;
@@ -112,11 +138,28 @@ app:
     timeout: 3s
 ```
 
-Spring Boot uses relaxed binding: the environment variable `APP_PAYMENT_URL` maps to `app.payment.url`. Keep secrets out of files; see [Secrets Management](../10-security/secrets-management.md).
+Boot uses relaxed binding. The environment variable `APP_PAYMENT_URL` maps to `app.payment.url`. Keep secrets out of files. See [Secrets Management](../10-security/secrets-management.md).
+
+### Property source precedence
+
+Higher sources override lower ones for the same key. The order interviewers expect you to know is:
+
+| Source (highest priority first) | Example |
+|---|---|
+| Command-line arguments | `--server.port=9090` |
+| `SPRING_APPLICATION_JSON` (inline JSON in an environment variable) | `{"server.port":9090}` |
+| Java system properties | `-Dserver.port=9090` |
+| OS environment variables | `SERVER_PORT=9090` |
+| Profile-specific file | `application-prod.yml` |
+| Default file | `application.yml` |
+| `@PropertySource` on a configuration class | `@PropertySource("classpath:extra.properties")` |
+| Built-in defaults | `server.port` defaults to 8080 |
+
+A profile-specific file beats the default file, but an environment variable beats both. That is why a secret the platform injects wins over anything committed to the repository. The reference documentation for your Boot version has the complete list.
 
 ### Starters and packaging
 
-A starter is a curated set of dependencies for one purpose (for example, `spring-boot-starter-data-jpa`). Starters carry no code of their own; they pull in the libraries and the auto-configuration that uses them. Because the versions are managed by Boot's parent POM or BOM, you leave the version off the starter.
+A starter is a curated set of dependencies for one purpose, such as `spring-boot-starter-data-jpa`. Starters contain no application code. They pull in libraries and the auto-configuration that uses them. Boot's parent POM or BOM manages the versions, so you leave the version off the starter.
 
 | Starter | Use it for | Brings in (main parts) |
 |---|---|---|
@@ -124,25 +167,25 @@ A starter is a curated set of dependencies for one purpose (for example, `spring
 | `spring-boot-starter-webflux` | Non-blocking web applications | Spring WebFlux, Reactor, embedded Netty |
 | `spring-boot-starter-data-jpa` | Relational persistence with entities | Spring Data JPA, Hibernate, HikariCP |
 | `spring-boot-starter-jdbc` | Plain JDBC with `JdbcTemplate` | Spring JDBC, HikariCP |
-| `spring-boot-starter-data-r2dbc` | Reactive relational access | Spring Data R2DBC (add your database driver) |
+| `spring-boot-starter-data-r2dbc` | Reactive relational access | Spring Data R2DBC. Add your database driver |
 | `spring-boot-starter-data-mongodb` | Document storage with MongoDB | Spring Data MongoDB |
 | `spring-boot-starter-data-redis` | Redis as a cache or data store | Spring Data Redis, Lettuce client |
 | `spring-boot-starter-security` | Authentication and authorisation | Spring Security |
 | `spring-boot-starter-oauth2-resource-server` | Accepting bearer tokens such as JWTs | Spring Security resource-server support |
 | `spring-boot-starter-validation` | Bean validation on requests and entities | Jakarta Bean Validation, Hibernate Validator |
 | `spring-boot-starter-actuator` | Health, metrics, and operational endpoints | Actuator and Micrometer |
-| `spring-boot-starter-cache` | The cache abstraction | Spring Cache; you add a provider such as Caffeine |
+| `spring-boot-starter-cache` | The cache abstraction | Spring Cache. Add a provider such as Caffeine |
 | `spring-boot-starter-amqp` | Messaging with RabbitMQ | Spring AMQP |
-| `spring-boot-starter-aop` | Cross-cutting behaviour, such as timing around service methods | Spring AOP and AspectJ weaver |
+| `spring-boot-starter-aop` | Cross-cutting behaviour, such as timing service methods | Spring AOP and the AspectJ weaver |
 | `spring-boot-starter-test` | Tests | JUnit 5, AssertJ, Mockito, Spring Test |
 
-Your database driver is usually not in a starter. Add it yourself, for example the MySQL or PostgreSQL JDBC driver, and check its version against the Boot release.
+Your database driver is usually not part of a starter. Add it yourself, such as the PostgreSQL or MySQL JDBC driver, and check that its version suits your Boot release.
 
-Packaging with the Spring Boot Maven or Gradle plugin produces an executable "fat" JAR that contains the application, its dependencies, and an embedded server. Layered JARs let container builds reuse unchanged dependency layers.
+Packaging with the Spring Boot Maven or Gradle plugin produces an executable "fat" JAR. It contains the application, its dependencies, and an embedded server. Layered JARs let container builds reuse the unchanged dependency layers.
 
 ### Startup and shutdown hooks
 
-Boot publishes events as the application starts. A listener for `ApplicationReadyEvent` runs after the context is fully refreshed and the server is accepting requests, which makes it the right place for work that needs the whole application, such as warming a cache. Work that a bean needs before anything else uses a `@PostConstruct` method, which runs during bean creation.
+Boot publishes events as the application starts. A listener for `ApplicationReadyEvent` runs after the context is fully refreshed and the server accepts requests. That makes it the right place for work that needs the whole application, such as warming a cache. Work a bean needs before anything else belongs in a `@PostConstruct` method, which runs during bean creation.
 
 ```java
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -159,7 +202,7 @@ class CatalogWarmup {
 }
 ```
 
-For cleanup, a `@PreDestroy` method runs when the context closes, which happens on SIGTERM and on a normal shutdown. Keep it short and bounded, because the container may stop it after a grace period.
+For cleanup, a `@PreDestroy` method runs when the context closes, which happens on a normal shutdown and on SIGTERM. Keep it short and bounded, because the platform may stop the process after a grace period.
 
 ```java
 import jakarta.annotation.PreDestroy;
@@ -175,35 +218,13 @@ class ConnectionReleaser {
 }
 ```
 
-## How it works / Step by step
+### @EntityScan and entity discovery
 
-1. `SpringApplication.run` creates the application context and reads the environment (command line, environment variables, property files, profiles).
-2. Component scanning registers your beans.
-3. Auto-configuration classes are evaluated against the conditions above and register default beans where allowed.
-4. The embedded server starts, and the application is ready.
-
-| Source (highest priority first) | Example |
-|---|---|
-| Command-line arguments | `--server.port=9090` |
-| `SPRING_APPLICATION_JSON` (inline JSON in an environment variable) | `{"server.port":9090}` |
-| Java system properties | `-Dserver.port=9090` |
-| OS environment variables | `SERVER_PORT=9090` |
-| Profile-specific file | `application-prod.yml` |
-| Default file | `application.yml` |
-| `@PropertySource` on a configuration class | `@PropertySource("classpath:extra.properties")` |
-| Built-in defaults (`SpringApplication` and the framework) | `server.port` defaults to 8080 |
-
-Higher sources override lower ones for the same key. The exact list is in the Spring Boot reference documentation for your version; the order above is the one interviewers expect you to know.
-
-Note that a profile-specific file beats the default file, but an environment variable beats both. This is why a secret injected by the platform wins over anything committed to the repository.
-
-## @EntityScan and entity discovery
-
-Spring Boot's JPA auto-configuration looks for `@Entity` classes in the packages registered by `@SpringBootApplication`: the application class's package and its subpackages. Entities outside that tree are not known to Hibernate until you tell it where to look.
+Boot's JPA auto-configuration looks for `@Entity` classes in the package of the application class and its subpackages. Entities outside that tree are unknown to Hibernate until you say where to look.
 
 - `@EntityScan(basePackages = "...")` or `basePackageClasses` extends the entity search to other packages.
-- It affects only entities. Spring beans still come from component scanning, and repositories still come from `@EnableJpaRepositories`.
-- Repositories outside the default package need `@EnableJpaRepositories` as well.
+- It affects only entities. Beans still come from component scanning, and repositories still come from `@EnableJpaRepositories`.
+- Repositories outside the default package also need `@EnableJpaRepositories`.
 - A missing entity usually surfaces at first use as a "Not a managed type" error.
 
 ```java
@@ -222,25 +243,52 @@ public class ShopApplication {
 }
 ```
 
-## Common pitfalls
+## Where it is used
 
-- Putting `@SpringBootApplication` in a sub-package, so most beans are never scanned.
-- Excluding an auto-configuration without understanding what it provides, which causes confusing missing-bean errors.
-- Hard-coding environment-specific values instead of using profiles or environment variables.
-- Using `@Value` with many keys across classes, which scatters configuration. Prefer a typed properties class.
-- Printing a configuration record with its default `toString`, which exposes secrets (see the override in the secrets page).
-- Relying on `spring.factories` for new auto-configuration; use the `AutoConfiguration.imports` file in Boot 2.7 and later.
+- **Microservices and REST APIs:** a single executable JAR with an embedded server.
+- **Batch and scheduled jobs:** an application with no web starter, started by the scheduler.
+- **Environment-specific settings:** profiles and environment variables for dev, test, and production.
+- **Platform deployments:** containers that inject configuration through environment variables.
+
+## Benefits
+
+- Quick start, with defaults for the common path.
+- Consistent dependency versions through starters and the parent POM.
+- Typed, validated configuration through `@ConfigurationProperties`.
+- Override points everywhere, through `@ConditionalOnMissingBean` and properties.
+
+## Cons and limits
+
+- Auto-configuration is hard to debug until you know the conditions.
+- Excluding an auto-configuration without understanding it causes confusing missing-bean errors.
+- Defaults are sensible for the common case, not for every workload.
+- Server and library support changes between Boot releases, so each upgrade needs checking.
+
+## Best practices
+
+- Put `@SpringBootApplication` in the root package of the application.
+- Use profiles and environment variables for values that change between environments.
+- Prefer a typed `@ConfigurationProperties` class to many scattered `@Value` fields.
+- Override a Boot default by defining a bean, not by excluding the whole auto-configuration.
+- Register new auto-configuration in the `AutoConfiguration.imports` file, not in `spring.factories`, on Boot 2.7 and later.
+- Keep secrets out of committed files, and do not print configuration records with their default `toString`, because that exposes secrets. See [Secrets Management](../10-security/secrets-management.md).
 
 !!! tip "Interview tip"
     **Q: What happens when you add a library to the classpath?**
-    Its auto-configuration becomes eligible. It only activates if the required classes are present, and it backs off if you define a bean of the same type. So the default is "use what is on the classpath, unless you say otherwise".
+    Its auto-configuration becomes eligible. It activates only when the classes it needs are present, and it backs off if you define a bean of the same type. The default rule is: use what is on the classpath, unless you say otherwise.
 
 ## Quick recap
 
-- `@SpringBootApplication` = `@Configuration` + `@EnableAutoConfiguration` + `@ComponentScan`.
-- Auto-configuration is conditional, and user-defined beans take precedence.
-- Profiles and property sources (with a defined precedence) drive environment-specific configuration.
+- `@SpringBootApplication` is `@Configuration` plus `@EnableAutoConfiguration` plus `@ComponentScan`.
+- Auto-configuration is conditional, and beans you define take precedence.
+- Profiles and property sources, with their defined precedence, drive environment configuration.
 - `@ConfigurationProperties` gives typed, testable configuration.
-- Starters bundle dependencies; the fat JAR bundles the server and the app.
+- Starters bundle dependencies. The fat JAR bundles the server and the application.
+
+## Official documentation
+
+- [Spring Boot reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [Spring Framework reference](https://docs.spring.io/spring-framework/reference/)
+- [Spring Data JPA reference](https://docs.spring.io/spring-data/jpa/reference/index.html)
 
 **See also:** [Spring Core](../08-spring-core/index.md) | [Building REST APIs](rest-apis.md) | [HTTP Clients and Testing](http-clients-and-testing.md)

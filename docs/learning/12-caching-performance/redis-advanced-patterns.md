@@ -1,42 +1,75 @@
 # Redis Advanced Patterns
 
-Redis is an in-memory data store with rich data types, and it is often used for caching, sessions, rate limits, leaderboards, and locks. The basics of Spring integration and the core data types are in [Spring Cache and Redis](spring-cache-and-redis.md). This page covers the parts interviewers probe: which operations are atomic, how to build a lock and a rate limiter that survive failures, how replication and failover work, and how to run Redis safely.
+!!! note "In simple words"
+    Redis runs each single command as one indivisible step, but a string of commands from one client can be interrupted. When a decision depends on several steps, fold them into one command or a Lua script. Treat Redis as a fast copy of your data, and keep the original elsewhere.
+
+## Why it matters
+
+Redis backs caches, sessions, rate limits, rankings, and locks. Each of those uses has a quiet failure mode. A lock released with the wrong check can delete somebody else's lock. A counter without an expiry can slowly fill memory. A cluster with a poor key layout rejects multi-key commands. Interviewers probe these spots to learn whether you reason about concurrency and failure, not just about command names. Spring wiring basics live in [Spring Cache and Redis](spring-cache-and-redis.md).
+
+## How it works
+
+Choosing a Redis design follows a repeatable path. Classify the data first, then match a data type to the access pattern, bound every key with a TTL, make read-then-write steps atomic, and pick a topology that survives the failures you expect.
+
+1. Classify the data: a cache, a derived store, or the system of record. Redis fits the first two.
+2. Choose the data type that matches the reads and writes, for example a sorted set for ranks or a hash for a record.
+3. Attach a TTL to every key, unless the key is an intentional persistent structure.
+4. Wrap any read-then-write decision in one atomic command or a Lua script.
+5. Pick a topology: a primary with replicas, Sentinel for automatic failover, or Cluster for more capacity.
+6. Monitor memory, hit rate, slow commands, and oversized keys from day one.
+
+The flowchart below shows the cache-aside read that most Redis caches follow. Every write that goes to the database also removes the affected key after the commit.
+
+```mermaid
+flowchart TD
+    A[Read key] --> B{Key present}
+    B -->|yes| C[Return value]
+    B -->|no| D[Load from database]
+    D --> E[SET with TTL]
+    E --> C
+    F[Write to database] --> G[Delete key after commit]
+```
 
 ## Core concepts
 
 ### Data types at the command level
-Each Redis type suits a specific shape of data. The commands below are the ones you will reach for most often.
+
+Each type fits a particular shape of data. These are the commands you will use most often:
 
 | Type | Core commands | Typical use |
 |---|---|---|
 | String | `SET key value EX seconds NX`, `GET`, `INCR`, `MGET` | Cached values, counters, flags |
-| List | `LPUSH`, `RPUSH`, `LPOP`, `LRANGE`, `LTRIM` | Simple queues, recent-activity feeds |
+| List | `LPUSH`, `RPUSH`, `LPOP`, `LRANGE`, `LTRIM` | Simple queues and activity feeds |
 | Set | `SADD`, `SISMEMBER`, `SINTER`, `SUNION` | Unique members, tags, deduplication |
 | Sorted set | `ZADD`, `ZINCRBY`, `ZREVRANGE`, `ZREVRANK`, `ZREMRANGEBYSCORE` | Leaderboards, sliding windows, time-ordered indexes |
-| Hash | `HSET`, `HGET`, `HINCRBY`, `HGETALL` | Object-like records such as a user profile |
+| Hash | `HSET`, `HGET`, `HINCRBY`, `HGETALL` | Record-like objects, such as a user profile |
 
-A few details that matter in practice:
+Some details that come up in practice:
 
-- `SET key value EX seconds NX` writes only if the key is absent and sets an expiry in one atomic step. This is the building block for locks.
-- `LTRIM list 0 99` keeps the newest 100 items of a list, which bounds a feed.
-- `INCR` is atomic, so concurrent counters need no application-side locking.
-- `ZINCRBY` updates a score atomically, and `ZREVRANGE` with `WITHSCORES` returns a ranked list.
+- `SET key value EX seconds NX` writes only when the key is missing, and it applies the expiry in that same step. This is the core of a lock.
+- `LTRIM list 0 99` keeps only the newest 100 entries, which caps a feed.
+- `INCR` is atomic, so concurrent counters need no client-side locking.
+- `ZINCRBY` changes a score atomically, and `ZREVRANGE ... WITHSCORES` returns the ranked list.
 
 ### Atomicity: single commands versus sequences
-Each Redis command runs atomically. A sequence of commands from one client does not. If your code runs `INCR` and then `EXPIRE` as two separate calls, a crash between them leaves a counter with no expiry. Two ways to close that gap:
 
-- Use a single command that does both, such as `SET ... EX ... NX`.
-- Use a Lua script. Redis runs a script as one atomic step, so the check and the change cannot be interleaved by another client.
+A single command is atomic. A sequence of commands from one client is not. If the code sends `INCR` and then `EXPIRE` as two calls, a crash between them leaves a counter that never expires. Two ways to close that gap:
 
-Lua scripts are the right tool when a decision depends on a read, such as "delete the lock only if it still holds my token".
+- Pick one command that performs both steps, such as `SET ... EX ... NX`.
+- Use a Lua script. Redis executes a script as one unit, so no other client can slip in between its check and its write.
+
+Reach for Lua when a choice depends on reading a value first, such as removing a lock only if it still carries your token.
 
 ## Distributed locks
-A distributed lock stops two processes from doing the same work at once, for example two instances processing the same order. The lock is a key with an expiry, so a crashed holder does not block forever.
 
-Two rules make the lock correct:
+A distributed lock stops parallel workers from repeating a job, such as two instances handling the same order. The lock is a key with a TTL, so a crashed holder cannot block others indefinitely.
 
-1. Acquire with `SET key token NX EX seconds`, where `token` is a random value unique to this holder.
-2. Release only if the key still holds your token. A plain `GET` followed by `DEL` is racy: the lock can expire and be taken by someone else between the two calls, and you would then delete their lock. A Lua script does the compare and delete atomically.
+Two rules make the lock sound:
+
+1. Take the lock with `SET key token NX EX seconds`. The `token` value should be random and private to this holder.
+2. Release only when the key still holds your token. A `GET` followed by `DEL` is unsafe, because the lock can expire and pass to someone else between the two calls. A Lua script performs the comparison and the deletion as one unit.
+
+*Spring Data Redis example (library code, not compiled here).*
 
 ```java
 import java.time.Duration;
@@ -61,8 +94,8 @@ public class OrderLock {
 
     public String tryAcquire(String key, Duration ttl) {
         String token = UUID.randomUUID().toString();
-        Boolean ok = redis.opsForValue().setIfAbsent(key, token, ttl);
-        return Boolean.TRUE.equals(ok) ? token : null;
+        Boolean acquired = redis.opsForValue().setIfAbsent(key, token, ttl);
+        return Boolean.TRUE.equals(acquired) ? token : null;
     }
 
     public boolean release(String key, String token) {
@@ -72,56 +105,58 @@ public class OrderLock {
 }
 ```
 
-Use it like this:
+A caller takes the lock, does its work in a `try` block, and releases in `finally`:
 
 ```java
 import java.time.Duration;
 
 class OrderProcessor {
 
-    // Stand-in for the lock client shown earlier on the page.
-    interface OrderLock {
+    // Stand-in for the OrderLock class shown above.
+    interface OrderLockApi {
         String tryAcquire(String key, Duration ttl);
-        void release(String key, String token);
+        boolean release(String key, String token);
     }
 
-    private final OrderLock orderLock;
+    private final OrderLockApi orderLock;
 
-    OrderProcessor(OrderLock orderLock) {
+    OrderProcessor(OrderLockApi orderLock) {
         this.orderLock = orderLock;
     }
 
     void processOrder(int orderId) {
-        // ... business logic ...
+        // Business logic goes here.
     }
 
-    void handle() {
-        String token = orderLock.tryAcquire("order:123:processing", Duration.ofSeconds(30));
+    void handle(int orderId) {
+        String key = "order:" + orderId + ":processing";
+        String token = orderLock.tryAcquire(key, Duration.ofSeconds(30));
         if (token == null) {
-            throw new IllegalStateException("Order 123 is already being processed");
+            throw new IllegalStateException("Order " + orderId + " is already being processed");
         }
         try {
-            processOrder(123);
+            processOrder(orderId);
         } finally {
-            orderLock.release("order:123:processing", token);
+            orderLock.release(key, token);
         }
     }
 }
 ```
 
-Limits to state in an interview:
+Limits to state out loud:
 
-- The lock expires after its TTL even if the work is still running. Keep the work well under the TTL, or extend the lock deliberately, and make the protected operation safe to retry.
-- A lock on a single Redis node is lost if that node fails before the write replicates. Redlock extends the idea across several independent nodes, but its safety is debated; see [Spring Cache and Redis](spring-cache-and-redis.md) for the trade-off.
-- When correctness matters more than availability, back the critical write with a database constraint or a fencing token, not with the lock alone.
+- The TTL expires even while the work continues. Keep the work well under the TTL, extend the lock on purpose, and make the protected step safe to retry.
+- A lock held on one node disappears if that node fails before the write reaches a replica. Redlock spreads the lock over several independent nodes, but its safety is disputed. See [Spring Cache and Redis](spring-cache-and-redis.md).
+- When a wrong result would be costly, enforce the rule with a database constraint or a fencing token. A lock alone cannot guarantee exclusivity.
 
 ## Rate limiting
-A rate limiter caps how many requests a client makes in a time window. Two common designs:
 
-- **Fixed window**: count requests per window using a key that includes the window number. It is simple and cheap, but a burst at the edge of two windows can pass twice the limit.
-- **Sliding log**: keep one sorted-set member per request, scored by its timestamp, and count the members in the last window. It is accurate, and it uses memory proportional to the request rate.
+A rate limiter caps the requests a client can make inside a time window. Two designs are common:
 
-The sliding log in Java, with `StringRedisTemplate`:
+- **Fixed window.** Count requests under a key that includes the window number. It is cheap and easy. Requests near a window boundary can pass at up to twice the limit.
+- **Sliding log.** Record each request as a sorted-set member scored by its timestamp, then count the members inside the last window. It is precise, but memory scales with request volume.
+
+*Spring Data Redis example (library code, not compiled here).*
 
 ```java
 import java.time.Duration;
@@ -155,12 +190,15 @@ public class SlidingWindowLimiter {
 }
 ```
 
-The UUID member matters: two requests in the same millisecond with a fixed member would collapse into one entry. This version still has a gap: two concurrent requests can both see room and both be added, so the limit can be exceeded by a few under heavy concurrency. For a strict limit, run the check, the trim, and the insert inside one Lua script.
+The random member is important. Two requests in the same millisecond with a fixed member would overwrite each other. The version above still has a race: two concurrent calls can both see free room and both insert, so a few extra requests can slip through under load. For a strict limit, put the trim, the count, and the insert into one Lua script.
 
-Return HTTP 429 with a `Retry-After` header when `allow` returns false. The limiter is typically called from a `HandlerInterceptor` or a gateway filter, not from business code.
+When `allow` returns false, answer with HTTP 429 and a `Retry-After` header. The check usually sits in a `HandlerInterceptor` or a gateway filter rather than in business code.
 
 ## Leaderboards
-A sorted set gives a leaderboard with rank lookups in logarithmic time:
+
+A sorted set gives a leaderboard, and rank lookups take logarithmic time.
+
+*Spring Data Redis example (library code, not compiled here).*
 
 ```java
 import java.util.Set;
@@ -187,23 +225,22 @@ public class Leaderboard {
     }
 
     public Long rankOf(String userId) {
-        return redis.opsForZSet().reverseRank(KEY, userId); // 0 is the top
+        return redis.opsForZSet().reverseRank(KEY, userId);   // 0 means first place
     }
 }
 ```
 
-Points to note: ranks are zero-based, `reverseRank` puts the highest score at 0, and members with equal scores are ordered lexicographically, so define a tie-break rule if ties matter. A weekly board is usually a new key per week with a TTL, not a deletion job.
+Positions are zero-based, so the top score sits at rank 0. Equal scores fall back to lexicographic order, which means you should define your own tie-break if it matters. Many teams open a new key each week and let a TTL retire the old one, instead of running a cleanup job.
 
 ## Pub/Sub and when to use Streams
-Pub/Sub delivers each message to the subscribers connected at that moment. Nothing is stored, so a message published while a subscriber is down is lost. It suits notifications that can be missed, such as a cache invalidation hint, where the next read would correct the state anyway.
 
-For work that must not be lost, use Redis Streams with consumer groups, which keep messages until they are acknowledged. For cross-service events, a message broker such as Kafka or RabbitMQ is often the better fit (see [Messaging](../13-messaging/index.md)).
+Pub/Sub pushes each message only to subscribers that are connected at that moment. It stores nothing, so anyone offline when a message goes out never sees it. That is acceptable for hints such as a cache invalidation signal, since the next read corrects things anyway.
 
-## Caching patterns beyond the annotations
-The cache-aside, write-through, and write-behind patterns are compared in [Distributed Caching](distributed-caching.md). With Redis as the store, cache-aside is the usual default: read the key, on a miss load from the database, then set the key with a TTL. Writes evict or update the key after the database commit. Write-behind is the riskiest, because a Redis failure before the flush loses writes, so use it only when that loss is acceptable.
+Messages that must survive a restart call for Redis Streams with consumer groups, which hold entries until they are acknowledged. For events between services, a broker such as Kafka or RabbitMQ is usually the stronger choice. See [Messaging](../13-messaging/index.md).
 
 ## Configuration in Spring Boot
-Spring Boot 3 uses the `spring.data.redis` prefix. The older `spring.redis` prefix is no longer the current form.
+
+Spring Boot 3 reads Redis settings from `spring.data.redis`. The older `spring.redis` prefix is out of date.
 
 ```yaml
 spring:
@@ -220,9 +257,9 @@ spring:
           min-idle: 5
 ```
 
-Connection pooling for Lettuce needs `commons-pool2` on the classpath. Read the password from the environment or a secrets store, never from source control.
+Lettuce pooling needs `commons-pool2` on the classpath. Pull the password from an environment variable or a secrets store, and keep it out of version control.
 
-Session storage moves HTTP sessions into Redis, so that any instance can serve any request:
+To keep HTTP sessions in Redis so that any instance can serve any request:
 
 ```yaml
 spring:
@@ -231,15 +268,17 @@ spring:
     timeout: 30m
 ```
 
-Store only small, serialisable values in the session, and remember that the session is copied on every change, so a large session costs bandwidth on each request.
+Keep session contents small and serialisable. The session is written back to Redis on each change, so a large session adds bandwidth to every request.
 
 ## High availability and scaling
 
 ### Replication
-A primary accepts writes and streams them to one or more replicas. Replicas serve reads and can be promoted by hand. Replication is asynchronous, so a failover can lose the most recent writes. Configure a replica with `replicaof <primary-host> <port>`; the older `slaveof` spelling is deprecated.
+
+A primary takes writes and streams them to its replicas. Replicas serve reads, and an operator can promote one by hand. Replication is asynchronous, so a failover can drop the newest writes. Point a server at its primary with `replicaof <primary-host> <port>`. The older `slaveof` keyword is deprecated.
 
 ### Sentinel
-Sentinel processes watch the primary and replicas, agree when the primary is down, and promote a replica. A quorum of sentinels must agree, so run an odd number, usually three or more, on separate machines.
+
+Sentinel processes watch the primary and its replicas. When a quorum agrees the primary is gone, one replica is promoted. Run an odd number of sentinels, normally three or more, on separate hosts.
 
 ```
 sentinel monitor mymaster 10.0.0.10 6379 2
@@ -247,7 +286,7 @@ sentinel down-after-milliseconds mymaster 5000
 sentinel failover-timeout mymaster 10000
 ```
 
-Clients ask Sentinel for the current primary. In Spring Boot, name the master and list the sentinel nodes:
+Clients ask Sentinel which node is the current primary. Spring Boot needs the master name and the sentinel addresses:
 
 ```yaml
 spring:
@@ -259,7 +298,8 @@ spring:
 ```
 
 ### Cluster
-Redis Cluster shards data across nodes. The keyspace has 16,384 hash slots, and each key maps to one slot. Each primary owns a range of slots and can have replicas, and the cluster handles failover for a failed primary.
+
+Redis Cluster splits the keyspace into 16,384 hash slots, and every key belongs to exactly one slot. Each primary owns a range of slots and may have replicas. When a primary fails, the cluster promotes one of its replicas.
 
 ```
 redis-server --port 7000 --cluster-enabled yes
@@ -267,17 +307,18 @@ redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 \
   127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 --cluster-replicas 1
 ```
 
-Multi-key commands and transactions require all keys to share a slot. Use a hash tag, such as `user:{42}:cart` and `user:{42}:wishlist`, so that only the part in braces decides the slot. Without this, multi-key operations fail with a cross-slot error.
+Multi-key commands and transactions require every key to live in the same slot. A hash tag solves this: `user:{42}:cart` and `user:{42}:wishlist` share a slot, because only the text inside the braces is hashed. Without one, a multi-key command fails with a cross-slot error.
 
-Choosing between them: Sentinel adds failover to a single dataset that fits on one primary. Cluster adds capacity beyond one machine, at the cost of the cross-slot restrictions.
+Choose Sentinel when one primary can hold the data and you only need failover. Choose Cluster when the data outgrows one machine, and accept the cross-slot restrictions that come with it.
 
 ## Persistence
-Redis holds data in memory, and persistence writes it to disk. Two mechanisms exist, and they can be combined.
 
-| Mechanism | How it works | Data at risk on crash | Cost |
+Redis holds its data in memory. Persistence copies that data to disk, and two mechanisms exist. You can use both together.
+
+| Mechanism | How it works | Data at risk on a crash | Cost |
 |---|---|---|---|
-| RDB snapshot | Writes a point-in-time file at intervals | Everything since the last snapshot | Compact file; fast restart |
-| AOF | Appends each write to a log, replayed on restart | Up to one second with `appendfsync everysec` | Larger file; more write work |
+| RDB snapshot | Writes a point-in-time file at set intervals | Everything since the last snapshot | Compact file and quick restart |
+| AOF | Appends every write to a log that is replayed at startup | Up to one second with `appendfsync everysec` | Larger file and more write work |
 
 ```
 save 900 1
@@ -286,23 +327,25 @@ appendonly yes
 appendfsync everysec
 ```
 
-Recent Redis versions write an RDB snapshot at the start of the AOF file by default, which gives fast restarts and a small log. Persistence protects against restarts, not against a bad write, and it does not replace backups. Even with AOF, a replica failover can drop acknowledged writes. Treat Redis as a cache or a fast store of derived data, and keep the source of truth in a database.
+Recent Redis releases write an RDB snapshot at the head of the AOF file by default, so restarts are fast and the log stays small. Persistence guards against restarts, but not against bad writes, and it cannot take the place of backups. Even with AOF, a failover to a replica can lose writes that were already acknowledged. Treat Redis as a cache or a fast store for derived data, and keep the authoritative copy in a database.
 
 ## Monitoring and debugging
 
 ### INFO and memory
-`INFO` groups server statistics into sections:
+
+`INFO` returns grouped statistics:
 
 ```bash
-redis-cli INFO memory      # used memory, fragmentation ratio
+redis-cli INFO memory      # used memory and fragmentation ratio
 redis-cli INFO stats       # commands processed, keyspace hits and misses
 redis-cli INFO clients     # connected clients
 ```
 
-Compare `keyspace_hits` with `keyspace_misses` to find the hit rate of the whole server. Watch `used_memory` against `maxmemory`, and set an eviction policy such as `maxmemory-policy allkeys-lru` if Redis is a cache. With `noeviction`, writes fail once memory is full, which is the right choice for data that must not be dropped.
+`keyspace_hits` against `keyspace_misses` gives the server-wide hit rate. Compare `used_memory` with `maxmemory`. For a cache, set a policy such as `maxmemory-policy allkeys-lru`. With `noeviction`, writes fail once memory runs out, which is right for data that must never disappear.
 
 ### SLOWLOG
-The slow log records commands that exceed a threshold:
+
+The slow log keeps commands that exceed a time threshold:
 
 ```bash
 redis-cli CONFIG SET slowlog-log-slower-than 10000   # microseconds
@@ -310,10 +353,11 @@ redis-cli SLOWLOG GET 10
 redis-cli SLOWLOG RESET
 ```
 
-Slow commands are usually `KEYS`, large `SMEMBERS` or `HGETALL` calls on big values, or Lua scripts that run too long. Replace `KEYS` with `SCAN`, which iterates in pages.
+The usual culprits are `KEYS`, large `SMEMBERS` or `HGETALL` reads on big values, and Lua scripts that run too long. Replace `KEYS` with `SCAN`, which pages through the keyspace.
 
 ### MONITOR and key analysis
-`MONITOR` streams every command the server receives. It is useful for a short debugging session, but it slows the server, so do not leave it running in production.
+
+`MONITOR` prints every command the server receives. It is handy for a brief debugging session, yet it adds load, so never leave it running in production.
 
 ```bash
 redis-cli --bigkeys               # largest key of each type
@@ -321,13 +365,51 @@ redis-cli MEMORY USAGE user:1     # bytes used by one key
 redis-cli OBJECT ENCODING user:1  # internal encoding, such as listpack or hashtable
 ```
 
-Big keys cause latency spikes when they are read or deleted, so split them, or delete them with `UNLINK`, which frees memory in the background.
+Oversized keys make reads and deletes slow enough to cause latency spikes. Break them up, or remove them with `UNLINK`, which frees memory in the background.
+
+## Where it is used
+
+- Locks that stop a scheduled job from running twice, and rate limits at a gateway.
+- Rankings for games and campaigns, and sessions shared by a fleet of web servers.
+
+## Benefits
+
+- Single commands are atomic, and sorted sets and hashes fit common access patterns without extra services.
+- Sentinel and Cluster are well-understood ways to add failover and capacity.
+- Keeping data in memory gives very low latency.
+
+## Cons and limits
+
+- Everything lives in memory, so memory size and the eviction policy shape the design.
+- Replication is asynchronous, so a failover can lose recent writes.
+- Cluster mode restricts multi-key operations.
+- A lock with a timeout cannot prove exclusive access by itself.
+- A Lua script that runs too long blocks every other client.
+- Write-behind caching over Redis loses unflushed writes when a node fails. [Distributed Caching](distributed-caching.md) compares the caching patterns.
+
+### Common pitfalls
+
+- Releasing a lock with `GET` then `DEL`, which can remove another holder's lock.
+- Setting a key and its TTL in two calls, which can leave a key that never expires.
+- Running `KEYS` in production, which stalls the server while it scans the keyspace.
+- Looping over single round trips. Batch them with `MGET`, a pipeline, or a Lua script.
+- Storing huge values, such as whole documents, with no size limit or compression.
+- Assuming Redis is the only copy of important data, and losing it during a failover.
+- Running without a password, or with the port open to the public network.
+- Using a single node for everything, with no failover plan and no monitoring.
 
 ## Best practices
-These habits keep a Redis deployment predictable. Each one is about how the data is named, sized, expired, or read.
+
+- Give every key a TTL unless it is a deliberate persistent structure.
+- For locks, use a random token and a compare-and-delete Lua script.
+- Use `SCAN` for maintenance work and `UNLINK` for deletion.
+- Name keys with an application prefix, a version, and a clear identifier.
+- Track memory, hit rate, the slow log, and large keys from the start.
+- Keep the authoritative data in a database, and make lock-protected writes safe to repeat.
 
 ### Key naming
-Use a consistent pattern: an application prefix, a version, the entity type, and the identifier, separated by colons. A readable key shows its purpose in `redis-cli` and makes pattern-based inspection possible.
+
+A consistent pattern makes keys readable in `redis-cli` and easy to inspect with patterns:
 
 ```java
 final class CacheKeys {
@@ -344,33 +426,32 @@ final class CacheKeys {
 }
 ```
 
-Including a version in the key handles schema changes. When the cached object's shape changes, bump the version. The old entries are no longer read and expire on their own, so no mass deletion is needed. Keep keys short, though. Very long keys waste memory on every entry.
+When the cached shape changes, bump the version. Old entries are no longer read, and they expire without a mass delete. Keep keys short, since every key costs memory.
 
 ### Avoid KEYS in production
-`KEYS pattern` scans the whole keyspace in one command and blocks every other client while it runs. Use the incremental `SCAN` command instead. It returns a cursor and a batch of keys each call, so the server stays responsive:
+
+`KEYS pattern` walks the entire keyspace in one call and blocks every other client until it finishes. `SCAN` walks the keyspace in small pages, so the server stays responsive:
 
 ```bash
 SCAN 0 MATCH orders:v2:order:* COUNT 500
 ```
 
-`SCAN` can return the same key more than once and can return zero keys in a batch while the cursor is still moving. Code that uses it must tolerate both. Use `SCAN` for maintenance tasks, not for the request path.
+A `SCAN` run can repeat a key, and a page can come back empty while the cursor still advances. Code using it must handle both cases. Keep `SCAN` for maintenance jobs, not the request path.
 
 ### Handle big keys
-A big key is one with a very large value or a collection with millions of members. Reading, rewriting, or deleting it blocks the single Redis thread for longer. To find them and size them:
+
+Oversized values and collections with millions of members both count as big keys. Touching one ties up the single Redis thread for longer. To locate and measure them:
 
 ```bash
 redis-cli --bigkeys                    # sampled report of the largest keys per type
 MEMORY USAGE orders:v2:order:42        # bytes used by one key
 ```
 
-Fixes:
-
-- Split a large collection into several keys, such as one hash per time bucket.
-- Store large documents in the database or object storage, and cache only what the request needs.
-- Delete with `UNLINK` instead of `DEL`. `UNLINK` removes the key from the keyspace at once and frees its memory in the background.
+Remedies: break a large collection into several keys, for example one hash per time bucket. Keep large documents in a database or object storage, and cache only the fields a request needs. Delete with `UNLINK`, not `DEL`.
 
 ### Set sensible TTLs
-Every cache key should have a TTL unless it is a deliberate persistent structure, such as a leaderboard that is managed explicitly. Without a TTL, cache keys accumulate and memory fills up. Add jitter so that many keys written together do not expire at the same moment:
+
+Give each cache key a TTL, except for structures you keep on purpose, such as a leaderboard you manage by hand. Without TTLs, cache keys build up until memory runs out. Add jitter, so keys written together do not expire together:
 
 ```java
 import java.time.Duration;
@@ -381,7 +462,7 @@ final class Ttls {
     private Ttls() {
     }
 
-    // A base of ten minutes plus up to one minute of random jitter
+    // Ten minutes plus up to one minute of random jitter.
     static Duration cacheEntry() {
         long jitterSeconds = ThreadLocalRandom.current().nextLong(60);
         return Duration.ofMinutes(10).plusSeconds(jitterSeconds);
@@ -389,46 +470,29 @@ final class Ttls {
 }
 ```
 
-Set the TTL in the same command as the value, for example with `SET key value EX seconds` or the `setIfAbsent` call with a duration, so a crash cannot leave a key without one.
+Set the TTL in the same command as the value, using `SET key value EX seconds` or `setIfAbsent` with a duration. A crash then cannot leave a key without a TTL.
 
-### Keep values small and access them in batches
-Keep each value small enough that reading it does not hold up other requests. Batch many reads into `MGET` or a pipeline rather than sending one round trip per key in a loop.
+### Secure the instance and keep values small
 
-### Secure the instance
-Enable authentication (`requirepass` or ACL users) and restrict network access, and use TLS when traffic crosses a network you do not fully control. Redis is not a durable store, so keep the system of record in a database and treat Redis as a copy.
-
-### Replication is not the same as high availability on its own
-Cluster provides sharding, which spreads keys across primaries. High availability for each shard comes from replicas and failover, through Sentinel or a managed service. Choose the topology for the failure you need to survive, not only for capacity.
-
-## How it works / Step by step
-When choosing a Redis pattern for a problem:
-
-1. Decide whether the data is a cache, a derived store, or a source of truth. Only the first two suit Redis as the main store.
-2. Pick the data type that matches the access pattern, such as a sorted set for ranks and a hash for a record.
-3. Set a TTL on every key unless the key is a deliberate persistent structure.
-4. Put any read-then-write decision inside one atomic command or a Lua script.
-5. Choose a replication topology: a primary with replicas, Sentinel for failover, or Cluster for capacity.
-6. Monitor memory, hit rate, slow commands, and big keys from day one.
-
-## Common pitfalls
-- Using `GET` then `DEL` to release a lock, which can delete another holder's lock.
-- Setting a key and then its TTL in separate calls, which can leave a key that never expires.
-- Calling `KEYS` in production, which blocks the server while it scans every key.
-- Running many round trips in a loop. Batch them with `MGET`, a pipeline, or a Lua script.
-- Storing very large values, such as whole documents, without compression or a size limit.
-- Relying on Redis as the only copy of data that matters, then losing it on failover.
-- Leaving the server without a password, or exposing its port to the public network.
-- Using a single Redis node for everything, with no failover plan and no monitoring.
+Turn on authentication through `requirepass` or ACL users, limit network access, and use TLS when traffic crosses networks you do not control. Keep each value small, and combine reads into one `MGET` or a pipeline rather than one round trip per key. Let a database remain the authority, and treat Redis as a copy. Cluster handles sharding, but each shard stays available only through its replicas and a failover mechanism such as Sentinel or a managed service. Pick the topology by the failures you need to survive, not merely by the capacity you need.
 
 !!! tip "Interview tip"
-    **Q: How would you make a Redis lock safe?**
-    Acquire with `SET key token NX EX`, using a random token. Release with a Lua script that deletes the key only when it still holds your token. Keep the protected work shorter than the TTL, and make the operation idempotent or guarded by a database constraint, because a lock with a timeout cannot prove exclusivity on its own.
+    **Q: Why is a naive Redis lock unsafe, and how do you fix it?**
+    Take the lock with `SET key token NX EX` and a random token. Free it through a Lua script that deletes only when the token still matches. Finish the protected work before the TTL runs out, make the step safe to repeat, and add a database constraint where a mistake would be expensive. A timeout alone never proves that nobody else is inside.
 
 ## Quick recap
-- Single Redis commands are atomic; sequences of commands are not, so combine steps with `SET ... NX EX` or a Lua script.
-- A safe lock uses a random token and a compare-and-delete release.
-- Sliding-log rate limiting uses a sorted set; a strict limit needs a Lua script.
-- Sentinel adds failover; Cluster adds sharding and needs related keys in one hash slot.
-- Monitor memory, hit rate, the slow log, and big keys, and keep the source of truth in a database.
 
-**See also:** [Spring Cache and Redis](spring-cache-and-redis.md), [Distributed Caching](distributed-caching.md), [Local Caching with Caffeine and EhCache](local-caching-ehcache-caffeine.md), [Resilience Patterns](../14-microservices/resilience-patterns.md), [AWS](../18-cloud/aws.md)
+- Each command is indivisible, but a sequence of commands is not. Merge dependent steps into one command or script.
+- Locks need random tokens, and a release that checks the token first.
+- Sliding logs live in sorted sets, and exact limits need scripting.
+- Sentinel covers failover, and Cluster covers sharding. Related keys must share a slot.
+- Keep an eye on memory, hit rate, slow commands, and big keys, and let a database hold the truth.
+
+## Official documentation
+
+- [Redis Documentation](https://redis.io/docs/latest/)
+- [Spring Data JPA Reference](https://docs.spring.io/spring-data/jpa/reference/index.html)
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+
+**See also:** [Spring Cache and Redis](spring-cache-and-redis.md) | [Distributed Caching](distributed-caching.md) | [Local Caching with Caffeine and EhCache](local-caching-ehcache-caffeine.md) | [Resilience Patterns](../14-microservices/resilience-patterns.md) | [AWS](../18-cloud/aws.md)

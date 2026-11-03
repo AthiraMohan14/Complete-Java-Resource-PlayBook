@@ -1,12 +1,44 @@
 # Transactions in Spring
 
-Spring manages transactions declaratively with `@Transactional`, or programmatically with `TransactionTemplate`. Both sit on a `PlatformTransactionManager`, which hides the differences between JDBC, JPA, and other resources. Interviewers ask about transactions to check that you know propagation, rollback rules, and why an annotation sometimes does nothing.
+!!! note "In simple words"
+    A transaction groups several database changes so they all save together or none do. In Spring you usually add `@Transactional` to a service method and let the framework start, commit, and roll back the transaction for you.
 
-## Core concepts
+## Why it matters
+
+Money transfers, orders, and stock updates fail when only half of their writes land. Transactions prevent that. Spring hides the differences between JDBC, JPA, and other resources behind one abstraction, so the same annotation works across them. Interviewers ask about transactions to test three things: propagation rules, rollback rules, and why an annotation sometimes does nothing at all.
+
+## How it works
+
+Spring manages transactions declaratively with `@Transactional`, or programmatically with `TransactionTemplate`. Both use a `PlatformTransactionManager`, which knows how to begin, commit, and roll back a transaction for one resource type. The Spring snippets on this page show the shape of the code; they are not compiled as part of this page.
+
+When a `@Transactional` method is called through the proxy, the following happens:
+
+1. The transaction interceptor asks the `PlatformTransactionManager` for a transaction, applying the propagation rules.
+2. If a new transaction is needed, the manager obtains a connection or `EntityManager` and begins the transaction.
+3. The method runs.
+4. On a normal return, the transaction commits. If the transaction was joined from an outer call, the outer call commits later.
+5. If an exception matches the rollback rules, the transaction rolls back and the exception continues to the caller.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Proxy
+    participant Service
+    participant TxManager as Transaction manager
+    participant Repo as Repository
+    Caller->>Proxy: call placeOrder
+    Proxy->>TxManager: begin transaction
+    Proxy->>Service: placeOrder
+    Service->>Repo: save order
+    Repo-->>Service: saved
+    Service-->>Proxy: returns
+    Proxy->>TxManager: commit
+    Proxy-->>Caller: done
+```
 
 ### Declarative transactions with @Transactional
 
-`@Transactional` marks a method (or class) as transactional. Spring wraps the bean in a proxy that starts a transaction before the method and commits or rolls back afterwards.
+`@Transactional` marks a method or a class as transactional. Put it on the service layer, where a unit of work is defined. Repositories and controllers are the wrong place.
 
 ```java
 import org.springframework.stereotype.Service;
@@ -22,20 +54,18 @@ public class PaymentService {
 }
 ```
 
-Put the annotation on the service layer, where a unit of work is defined, rather than on repositories or controllers.
-
 ### Propagation
 
-Propagation decides what happens when a transactional method is called while a transaction already exists.
+Propagation decides what happens when a transactional method is called while a transaction is already running.
 
 | Propagation | Behaviour |
 |---|---|
 | `REQUIRED` (default) | Join the current transaction, or start one if none exists |
-| `REQUIRES_NEW` | Suspend the current transaction and start a new, independent one |
-| `NESTED` | Run inside a savepoint of the current transaction; needs savepoint support (JDBC) |
-| `SUPPORTS` | Join if one exists; otherwise run without a transaction |
-| `NOT_SUPPORTED` | Run without a transaction; suspend any existing one |
-| `MANDATORY` | Require an existing transaction; fail if none |
+| `REQUIRES_NEW` | Suspend the current transaction and start a separate, independent one |
+| `NESTED` | Run inside a savepoint of the current transaction. Needs savepoint support, which JDBC provides. The JPA transaction manager does not allow it unless you enable nested transactions |
+| `SUPPORTS` | Join a transaction if one exists. Otherwise run without one |
+| `NOT_SUPPORTED` | Run without a transaction, suspending any existing one |
+| `MANDATORY` | Require an existing transaction. Fail if none exists |
 | `NEVER` | Fail if a transaction exists |
 
 ```java
@@ -51,11 +81,11 @@ public class AuditService {
 }
 ```
 
-`REQUIRES_NEW` is useful for audit records that must persist even when the business operation fails. It takes a separate database connection, so it can exhaust a pool if overused.
+`REQUIRES_NEW` suits audit records that must survive a failed business operation. It takes a second database connection, so calling it in a loop can exhaust the connection pool.
 
 ### Rollback rules
 
-By default, Spring rolls back when a method throws an unchecked exception (`RuntimeException` or `Error`). A checked exception commits the transaction unless you say otherwise. This surprises many people.
+By default, Spring rolls back when a method throws an unchecked exception (a `RuntimeException` or an `Error`). A checked exception commits the transaction unless you say otherwise. This surprises many developers.
 
 ```java
 import org.springframework.transaction.annotation.Transactional;
@@ -69,16 +99,16 @@ public class ImportService {
 
     @Transactional(noRollbackFor = IllegalStateException.class)
     public void tolerateWarnings() {
-        // this exception type does not roll back
+        // this exception type does not trigger a rollback
     }
 }
 ```
 
-Catching an exception inside a transactional method and not rethrowing it commits the transaction, because Spring never sees the failure. If you must catch, mark the transaction for rollback with `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`, or rethrow.
+Catching an exception inside a transactional method and not rethrowing it commits the transaction, because Spring never sees the failure. If you must catch it, mark the transaction for rollback with `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`, or rethrow the exception.
 
 ### Isolation levels
 
-The `isolation` attribute sets the database isolation level for the transaction (see [Advanced SQL and Transactions](../06-databases-sql/advanced-sql-transactions.md)). It is applied when the transaction starts and is only honoured if the database supports it.
+The `isolation` attribute sets the isolation level for the transaction. It applies when the transaction starts, and only if the database supports that level. See [Advanced SQL and Transactions](../06-databases-sql/advanced-sql-transactions.md) for what each level allows.
 
 ```java
 import org.springframework.transaction.annotation.Isolation;
@@ -87,17 +117,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
-    public int reserve(long itemId, int quantity) {
-        return 0;   // placeholder body for illustration
+    public void reportStock(long itemId) {
+        // reads inside this method see a consistent snapshot of the item
     }
 }
 ```
 
-Use isolation levels sparingly. Stronger levels reduce anomalies but reduce concurrency. For counter updates, an atomic `UPDATE` or explicit locking is often clearer than a high isolation level.
+Stronger levels reduce anomalies but also reduce concurrency. For a counter update, a single atomic `UPDATE` statement or an explicit row lock is often clearer and cheaper than raising the isolation level.
 
 ### Read-only optimisation
 
-`@Transactional(readOnly = true)` is a hint. Spring passes it to the transaction manager, which may let JPA skip dirty checking and let the driver route to a replica. It does not prevent writes at the database level in every setup, so do not rely on it for security.
+`@Transactional(readOnly = true)` is a hint. Spring passes it to the transaction manager, which may let JPA skip dirty checking and may let the driver route the query to a replica. It is not a security control. Some setups still allow writes, so never rely on it to block changes.
 
 ```java
 import java.util.List;
@@ -114,7 +144,7 @@ public class OrderQueryService {
 
 ### Programmatic transactions: TransactionTemplate
 
-`TransactionTemplate` runs a block inside a transaction without a proxy. It is useful when you need a transaction boundary inside a method, or when self-invocation makes the annotation ineffective.
+`TransactionTemplate` runs a block inside a transaction without relying on a proxy. It is useful when you need a boundary in the middle of a method, or when self-invocation makes the annotation ineffective.
 
 ```java
 import org.springframework.stereotype.Service;
@@ -141,11 +171,11 @@ public class SettlementService {
 }
 ```
 
-`PlatformTransactionManager` is the abstraction Spring uses for all transaction resources. Spring Boot configures one automatically (for JPA, `JpaTransactionManager`; for JDBC, `DataSourceTransactionManager`).
+Spring Boot configures a `PlatformTransactionManager` automatically: `JpaTransactionManager` when JPA is on the classpath, and `DataSourceTransactionManager` for plain JDBC.
 
 ### Multiple databases and transaction managers
 
-When an application writes to two databases, each database needs its own transaction manager, and Spring cannot make one `@Transactional` method commit both atomically. Name the managers, mark one as `@Primary`, and choose the other explicitly on the annotation.
+When an application writes to two databases, each database needs its own transaction manager. Spring cannot make one `@Transactional` method commit both atomically. Name the managers, mark one as `@Primary`, and select the other explicitly on the annotation.
 
 ```java
 import jakarta.persistence.EntityManagerFactory;
@@ -182,19 +212,18 @@ class OrderWithAudit {
     @Transactional                                        // uses the primary manager
     public void placeOrder() { }
 
-    @Transactional(transactionManager = "auditTx")        // separate transaction on the audit database
+    @Transactional(transactionManager = "auditTx")        // a separate transaction on the audit database
     public void recordAudit() { }
 }
 ```
 
-Two points come up in interviews. First, Boot's JPA auto-configuration backs off once you define your own `EntityManagerFactory` and transaction manager, so you take responsibility for both. Second, if the audit write must match the order write, a single transaction is not possible. Use an outbox table in the primary database, or a saga with compensation, instead of two commits that can disagree.
+Two points come up in interviews. First, Boot's JPA auto-configuration backs off once you define your own `EntityManagerFactory` and transaction manager, so you take responsibility for both. Second, if the audit write must match the order write, one transaction cannot cover both databases. Use an outbox table in the primary database, or a saga with compensating steps, instead of two commits that might disagree.
 
 ### Wiring a DataSource and EntityManagerFactory per database
 
-A transaction manager is only half of a second database. Each database also needs its own `DataSource` and its own `EntityManagerFactory`, and the factory must be pointed at the right entity package. Boot's auto-configuration creates one set of these, and it steps back once you define your own, so you define both sets explicitly. The pattern below keeps Boot's Hibernate settings by taking the `EntityManagerFactoryBuilder` that Boot provides.
+A transaction manager is only half of a second database. Each database also needs its own `DataSource` and its own `EntityManagerFactory`, and each factory must scan the right entity package. Boot creates one set automatically and steps back once you define your own, so you define both sets. The pattern below keeps Boot's Hibernate settings by using the `EntityManagerFactoryBuilder` that Boot provides.
 
 ```java
-import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.autoconfigure.orm.jpa.EntityManagerFactoryBuilder;
@@ -203,6 +232,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import javax.sql.DataSource;
 
 @Configuration
 class OrdersDatabaseConfig {
@@ -258,19 +288,19 @@ class AuditDatabaseConfig {
 }
 ```
 
-Each factory gets its own persistence unit name and its own entity package, so Hibernate never maps an entity to the wrong database. The transaction managers from the previous section then use these factories by name. Keep the two packages disjoint: an entity picked up by both factories is mapped twice.
+Each factory has its own persistence unit name and its own entity package, so Hibernate never maps an entity to the wrong database. The transaction managers in the previous section refer to these factories by name. Keep the two packages separate. An entity picked up by both factories is mapped twice.
 
-Two cautions. Repositories also need to be bound to the right factory, which Spring Data does with `@EnableJpaRepositories` and the `entityManagerFactoryRef` and `transactionManagerRef` attributes, one configuration per database. And a JPA entity that references an entity in the other database cannot be joined in SQL, so the link must be a plain id.
+Two cautions. Repositories must also be bound to the right factory. Spring Data does this with `@EnableJpaRepositories` and the `entityManagerFactoryRef` and `transactionManagerRef` attributes, with one configuration per database. Also, a JPA entity in one database cannot be joined to an entity in the other database in SQL, so store a plain id as the link.
 
 ### Read-write split with a routing DataSource
 
-When one database has a read replica, you can send reads to the replica and writes to the primary. Spring's `AbstractRoutingDataSource` picks a `DataSource` per connection, based on a lookup key. Use the transaction's `readOnly` flag as that key, so a method annotated `@Transactional(readOnly = true)` reads from the replica without any change to the repository code.
+When a database has a read replica, you can send reads to the replica and writes to the primary. Spring's `AbstractRoutingDataSource` chooses a `DataSource` for each connection, based on a lookup key. Use the transaction's read-only flag as that key. A method marked `@Transactional(readOnly = true)` then reads from the replica without any change to the repository code.
 
 ```java
 import java.util.Map;
 import javax.sql.DataSource;
-import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -310,58 +340,73 @@ class ReadWriteConfig {
         ReadWriteRouter router = new ReadWriteRouter();
         router.setTargetDataSources(Map.of(Route.WRITE, primary, Route.READ, replica));
         router.setDefaultTargetDataSource(primary);
-        return new LazyConnectionDataSourceProxy(router);   // pick the connection after the flag is known
+        return new LazyConnectionDataSourceProxy(router);   // choose the connection after the flag is known
     }
 }
 ```
 
-The `LazyConnectionDataSourceProxy` wrapper matters. It delays acquiring the physical connection until the first statement, so the routing decision sees the transaction's read-only flag. Without it, the connection can be opened before the flag is set and every query goes to the primary.
+The `LazyConnectionDataSourceProxy` wrapper is essential. It delays acquiring a physical connection until the first statement, so the routing decision sees the read-only flag. Without it, the connection can be opened before the flag is set, and every query goes to the primary.
 
 Three cautions for an interview answer:
 
-- Replicas lag behind the primary. A read right after a write, from a read-only transaction, can miss the write. Send read-your-own-write flows to the primary.
-- Check the routing with a test that asserts which database a read-only query used. The exact timing depends on the transaction manager, and the flag can be set after a JPA transaction has already taken a connection, so confirm it for your setup rather than assuming it.
+- Replicas lag behind the primary. A read right after a write can miss that write. Send read-your-own-write flows to the primary.
+- Test the routing. Write a test that checks which database a read-only query used. The timing depends on the transaction manager. In a JPA transaction the flag may be set after a connection is already taken, so confirm the behaviour in your setup.
 - Mark only truly read-only methods as `readOnly = true`. A write sent through a read-only transaction goes to the replica and fails.
 
 ### Self-invocation and visibility
 
 Two common reasons an annotation has no effect:
 
-- **Self-invocation:** calling a `@Transactional` method from the same class skips the proxy. See [AOP](aop.md).
-- **Non-public methods:** the proxy cannot intercept private methods, and by default only public methods are transactional.
+- **Self-invocation:** calling a `@Transactional` method from another method of the same class bypasses the proxy. See [AOP](aop.md).
+- **Non-public methods:** the proxy does not intercept private methods, and by default only public methods are transactional.
 
-## How it works / Step by step
+## Where it is used
 
-When a `@Transactional` method is called through the proxy:
+- **Service methods** that change several rows, such as placing an order and reserving stock.
+- **Read-only queries** that should use a replica or skip dirty checking.
+- **Audit or outbox writes** that must survive a failed business operation, using `REQUIRES_NEW` or a separate manager.
+- **Batch jobs**, where `TransactionTemplate` commits in chunks.
 
-1. The transaction interceptor asks the `PlatformTransactionManager` for a transaction, applying propagation rules.
-2. If a new transaction starts, the manager obtains a connection (or EntityManager) and begins it.
-3. The method runs.
-4. On normal return, the transaction commits (or joins the outer one, which commits later).
-5. On an exception matching the rollback rules, the transaction rolls back and the exception propagates.
+## Benefits
 
-Nested calls with `REQUIRED` do not commit on return; only the outermost transaction commits.
+- All-or-nothing writes without manual commit and rollback code.
+- The same annotation works across JDBC, JPA, and other resources.
+- Propagation rules let services compose without knowing about each other's transactions.
+- Routing and multiple managers handle larger architectures without changing the business code.
 
-## Common pitfalls
+## Cons and limits
 
-- Expecting a checked exception to roll back. It does not, unless `rollbackFor` says so.
-- Catching and swallowing an exception inside a transactional method, which commits partial work.
-- Calling a `@Transactional` method from the same class.
-- Putting `@Transactional` on a private method.
-- Making an external HTTP call inside a transaction, which holds a database connection for the duration.
-- Using `REQUIRES_NEW` in a loop, which exhausts the connection pool.
-- Relying on `readOnly = true` as a security boundary.
+- The proxy only sees calls from outside the bean. Self-invocation silently skips the transaction.
+- A transaction holds a database connection for its whole length. Slow work inside it reduces throughput.
+- Rollback rules are easy to get wrong with checked exceptions and swallowed exceptions.
+- One transaction cannot span two databases. Cross-database consistency needs patterns such as an outbox or sagas.
+- Replicas return slightly stale data.
+
+## Best practices
+
+- Put `@Transactional` on service methods, not on controllers or repositories.
+- Keep transactions short. Do not call external HTTP services while a transaction is open.
+- Declare `rollbackFor` for checked exceptions that should roll back.
+- Never catch and swallow an exception inside a transactional method unless you mark the transaction for rollback.
+- Avoid `REQUIRES_NEW` in loops, because each call takes another connection.
+- Do not treat `readOnly = true` as a security boundary.
 
 !!! tip "Interview tip"
     **Q: Why did my `@Transactional` method not roll back when an exception was thrown?**
-    Check three things: whether the exception is checked (it commits by default), whether the exception was caught inside the method, and whether the call bypassed the proxy through self-invocation. Mention `rollbackFor` as the fix for checked exceptions.
+    Check three things. Was the exception checked? Checked exceptions commit by default, so add `rollbackFor`. Was the exception caught inside the method? A caught exception never reaches the proxy. Did the call bypass the proxy through self-invocation? Those three causes cover most cases.
 
 ## Quick recap
 
-- `@Transactional` is applied by a proxy; it wraps calls, not internal calls.
-- `REQUIRED` joins or starts a transaction; `REQUIRES_NEW` always starts a new one.
-- By default, runtime exceptions roll back; checked exceptions commit unless `rollbackFor` is set.
+- `@Transactional` is applied by a proxy, so it covers calls that come through the proxy, not internal calls.
+- `REQUIRED` joins or starts a transaction. `REQUIRES_NEW` always starts a new one.
+- Runtime exceptions roll back by default. Checked exceptions commit unless `rollbackFor` is set.
 - `TransactionTemplate` gives explicit control over the boundary.
-- Keep transactions short; do not hold them open during network calls.
+- Keep transactions short, and never hold them open during network calls.
 
-**See also:** [AOP](aop.md), [Dependency Injection](dependency-injection.md), [JDBC](../07-jdbc-jpa/jdbc.md)
+## Official documentation
+
+- [Spring Framework reference](https://docs.spring.io/spring-framework/reference/)
+- [Spring Data JPA reference](https://docs.spring.io/spring-data/jpa/reference/index.html)
+- [Spring Boot reference](https://docs.spring.io/spring-boot/reference/index.html)
+
+**See also:** [AOP](aop.md), [Dependency Injection](dependency-injection.md), [Spring Data JPA](../07-jdbc-jpa/spring-data-jpa.md), [JDBC](../07-jdbc-jpa/jdbc.md)

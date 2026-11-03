@@ -1,74 +1,93 @@
 # Distributed Caching
 
-A distributed cache is shared by many application instances, so every instance sees the same cached values. That sharing makes caching useful at scale, but it also makes consistency harder: a write on one instance must invalidate or update entries that others may hold. Interviewers ask about this to test your understanding of invalidation strategies and of the trade-offs between freshness and load on the database.
+!!! note "In simple words"
+    A distributed cache is one shared store that all application instances read from. Because it is shared, a change made on one instance can be seen everywhere, but only if the old entries are removed or refreshed when the data changes.
 
-## Core concepts
+## Why it matters
 
-### Local versus distributed caches
+Once an application runs on several instances, a per-instance cache starts giving different answers depending on which instance you hit. A shared cache removes that split and also relieves the database. The price is coordination: every write has to remove or refresh the entries that other instances may be holding, and that coordination is where most caching bugs appear. Interviewers use this topic to see how you handle invalidation, races, and the balance between freshness and database load.
 
-A local (in-process) cache, such as Caffeine, is very fast but private to one instance. Two instances can return different values after an update. A distributed cache such as Redis or Memcached is shared, so all instances read the same entry, at the cost of a network round trip. Many systems use both: a short-lived local cache in front of a shared one. Local layers need their own invalidation or very short TTLs.
+## How it works
 
-### Memcached
+Most distributed caches are paired with the cache-aside pattern. The application owns both the cache and the database, and it chooses when to read from and write to each one.
 
-Memcached is a simple, fast, multi-threaded key-value cache. It stores strings and binary blobs with optional expiry, has no persistence, and has no built-in data structures, replication, or cluster coordination beyond client-side sharding. It is a good fit for pure caching of values. Redis offers more features (data structures, persistence, replication, Lua scripts), so teams often choose Redis unless they need Memcached's simplicity at very high volume.
+1. A read checks the cache first.
+2. On a miss, the application queries the database, stores the result with a TTL, and returns it.
+3. A write updates the database first, then deletes the cache key.
+4. The next read misses, reloads, and stores the fresh value.
 
-### Cache coherence across nodes
-
-Coherence means that after a change, no instance serves the old value for longer than you can accept. A cache that is never invalidated stays wrong until its TTL expires. Common approaches:
-
-- TTLs: a bound on staleness. Simple and always useful as a backstop.
-- Explicit invalidation: delete or update the key when the data changes.
-- Event-driven invalidation: publish a change event (through Redis pub/sub, Kafka, or another broker) that instances use to evict local entries.
-- Versioned keys: include a version in the key, so a new version is read without deleting old ones.
-
-Versioned keys avoid races when many writers exist, at the cost of storing old entries until they expire.
-
-### Invalidation strategies
-
-| Strategy | How it works | Trade-off |
-|---|---|---|
-| Cache-aside (lazy loading) | App reads the cache; on miss, loads from DB and fills the cache. On write, the app updates the DB and evicts the key | Simple and common; a race can briefly store stale data |
-| Read-through | The cache itself loads from the DB on a miss | App code is simpler; the cache needs a loader |
-| Write-through | Writes go to the cache and the DB together, synchronously | Consistent reads; writes are slower |
-| Write-behind (write-back) | Writes go to the cache, and the DB is updated asynchronously later | Fast writes; risk of data loss if the cache fails before flushing |
-
-Cache-aside is the usual default in Spring applications, because `@Cacheable` and `@CacheEvict` implement it.
+The sequence below covers a cache-aside read, followed by a write that evicts the key after the commit.
 
 ```mermaid
 sequenceDiagram
     participant App
     participant Cache
     participant DB
-    App->>Cache: get(key)
-    alt hit
-        Cache-->>App: value
-    else miss
-        Cache-->>App: null
-        App->>DB: read
-        DB-->>App: row
-        App->>Cache: set(key, value, ttl)
+    App->>Cache: Get key
+    alt Hit
+        Cache-->>App: Cached value
+    else Miss
+        Cache-->>App: Nothing found
+        App->>DB: Read row
+        DB-->>App: Row
+        App->>Cache: Set key with TTL
     end
+    App->>DB: Write row
+    App->>Cache: Delete key after commit
 ```
 
-### Coordinating writes between cache and database
+### Local versus distributed caches
 
-The hard part is ordering. A common race under cache-aside:
+A local cache such as Caffeine is extremely fast, yet it is private to the instance that holds it. After an update, another instance may still return the old value. A distributed cache such as Redis or Memcached is one copy visible to all instances, and each lookup pays for a network hop. Many systems combine them, with a short-lived local layer in front of the shared store, and that local layer needs either explicit invalidation or a very short TTL.
 
-1. Instance A reads the row (old value) from the database.
-2. Instance B updates the row and deletes the cache key.
-3. Instance A writes its old value into the cache.
+### Memcached
 
-The cache now holds stale data until the TTL expires. Mitigations:
+Memcached is a lean, multi-threaded key-value store. It keeps strings and binary values with an optional expiry, but it offers no persistence, no data structures, and no replication. Sharding happens in the client. Teams that want more than plain values, including persistence and scripting, usually choose Redis. Memcached remains attractive when simplicity matters most and the volume is very high.
 
-- Keep a TTL on every entry, so the damage is bounded.
-- Delete the key after the database commit, not before. Delete-after-commit avoids some races, but not all.
-- Use a short-lived version check or compare-and-set when writing into the cache.
-- Publish the invalidation event after the transaction commits. If it is sent before the commit, another instance can evict the key, read the still-old row, and refill the cache with stale data. A rollback after an early event only causes an extra miss, which is harmless.
+### Cache coherence across nodes
 
-Transactional events are a common approach (see [Event-Driven Architecture](../13-messaging/event-driven-architecture.md)).
+Coherence means that after a change, no instance returns the old value for longer than the business allows. A key that is never invalidated stays wrong until its TTL expires. Four common tools:
 
-### Explicit refresh endpoint
-Sometimes a TTL is too slow and an event pipeline is too much work, for example after a bad data load or a price correction. An operator can then trigger invalidation with an admin endpoint. The endpoint clears one named cache, so the blast radius is known:
+- **TTL.** Caps how long a stale value can survive. It is simple and always worth having as a backstop.
+- **Explicit invalidation.** Remove or overwrite the key when the underlying row changes.
+- **Event-driven invalidation.** Publish a change message on Redis pub/sub, Kafka, or another broker. Each instance evicts its local copy when the message arrives.
+- **Versioned keys.** Embed a version in the key, so readers move to the new version and the old entries age out untouched.
+
+Versioned keys sidestep some races between writers, at the cost of holding old entries until they expire.
+
+### Invalidation strategies
+
+| Strategy | How it works | Trade-off |
+|---|---|---|
+| Cache-aside (lazy loading) | Read the cache. On a miss, load the database and fill the cache. On a write, update the database and evict the key | Simple and common. A race can briefly store stale data |
+| Read-through | The cache itself loads from the database on a miss | Simpler application code. The cache needs a loader |
+| Write-through | Writes reach the cache and the database together, synchronously | Consistent reads. Slower writes |
+| Write-behind (write-back) | Writes land in the cache first, and the database catches up later | Fast writes. Data is lost if the cache fails before flushing |
+
+Cache-aside is the usual default in Spring. `@Cacheable` and `@CacheEvict` implement it for you. See [Spring Cache and Redis](spring-cache-and-redis.md).
+
+### The write race under cache-aside
+
+The difficult part is ordering. Suppose two instances interleave like this:
+
+1. Instance A loads the row, which still contains the old value.
+2. Instance B writes the new value to the row, then removes the cached key.
+3. Instance A puts its stale value back into the cache.
+
+Until the TTL fires, the cache serves the stale value. The following steps reduce the damage:
+
+- Attach a TTL to every entry, so the window of staleness has a fixed upper limit.
+- Remove the key after the database commit, not before. Removing after commit closes some races, though not all.
+- Use a version check or a compare-and-set when writing into the cache.
+- Send the invalidation event only after the transaction commits. An early event lets another instance evict the key, reload the old row, and cache it again. If the transaction rolls back after an early event, the cost is just one extra miss.
+
+Transactional event publishing is a common way to send events only after a commit. See [Event-Driven Architecture](../13-messaging/event-driven-architecture.md).
+
+### Admin refresh endpoint
+
+Sometimes a TTL is too slow to help, and building an event pipeline would cost more than the problem deserves, for example after a faulty data load or a price fix. An operator can call an admin endpoint that clears one named cache.
+
+*Spring Boot and Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.cache.Cache;
@@ -103,28 +122,30 @@ class CacheRefreshController {
 }
 ```
 
-Points to take into account:
+Operational notes for that endpoint:
 
-- Restrict the endpoint to operators. `@PreAuthorize` needs method security enabled, and the endpoint should not be reachable from the public internet.
-- Clear by name rather than wiping every cache. Clearing everything at once sends a burst of traffic to the database.
-- With a local cache, `cache.clear()` only affects the instance that receives the call. Call the endpoint on each instance, or publish an invalidation event that all instances consume. With a shared Redis cache, clearing the cache removes the entries for all instances, but any local layer still needs its own refresh.
-- Log who called the endpoint and which cache was cleared. Cache clears can change response times for every user.
+- Limit it to operators. `@PreAuthorize` requires method security, and the route must stay off the public internet.
+- Clear by name. Wiping every cache at once sends a flood of reads to the database.
+- A local cache is cleared only on the instance that handled the call. Call the endpoint on each instance, or publish an event that all instances consume. A shared Redis cache is cleared for everyone, but any local layer in front of it still needs its own refresh.
+- Record who called it and which cache was cleared, because a clear can change response times for every user.
 
 ### Cache stampede
 
-When a popular key expires, many requests miss at the same moment and all hit the database. Mitigations:
+A stampede happens when a hot key expires and many concurrent requests miss together, all hitting the database at once. Prevention options:
 
-- Add jitter to TTLs, so keys do not all expire together.
-- Use a single-flight lock: one request recomputes, others wait or serve a slightly stale value.
-- Refresh early in the background before the TTL ends.
+- Add jitter to TTLs, so keys written together do not expire together.
+- Use a single-flight lock, so one request recomputes while the rest wait or receive a slightly stale value.
+- Refresh the value in the background shortly before its TTL ends.
 
 ### Hot keys and sizing
 
-A single very popular key can overload one cache node. Spread load by replicating hot values or by splitting them across keys. Set a maximum memory limit and an eviction policy on Redis or Memcached, so the cache does not exhaust memory. Monitor hit rate: a low hit rate means the cache is adding latency without saving work.
+A single very popular key can overwhelm one cache node. Replicate the value or split it across several keys to spread the load. Cap memory and choose an eviction policy on Redis or Memcached, so the server cannot run out of space. Track the hit rate, because a low hit rate means the cache adds latency without saving work.
 
 ### Layered caching in code
 
-A common production shape is a short-lived local cache in front of a shared one, or in front of the database. Caffeine handles the local layer, and `get(key, loader)` runs the loader once per key on that instance, which protects the database from a local stampede:
+One frequent layout puts a brief local cache in front of a shared cache, or directly in front of the database. Caffeine supplies the local layer. Its `get(key, loader)` runs the loader once per key on each instance, which shields the database from a local stampede.
+
+*Spring and Caffeine example (library code, not compiled here).*
 
 ```java
 import com.github.benmanes.caffeine.cache.Cache;
@@ -142,7 +163,7 @@ interface CustomerStore {
 @Service
 class CustomerReadService {
 
-    // Local layer: fast and private to this instance; the short TTL bounds staleness.
+    // Local layer: fast and private to this instance. The short TTL limits staleness.
     private final Cache<Long, Customer> local = Caffeine.newBuilder()
             .maximumSize(10_000)
             .expireAfterWrite(30, TimeUnit.SECONDS)
@@ -159,43 +180,73 @@ class CustomerReadService {
     }
 
     void evictLocally(long id) {
-        // Other instances still serve their copy until its TTL expires,
+        // Other instances keep their copies until those expire,
         // unless an invalidation event reaches them.
         local.invalidate(id);
     }
 }
 ```
 
-The local TTL is short on purpose. If instances must agree within seconds, combine short TTLs with invalidation events published after the database commit (see the previous section). The layers do not need to share a TTL, but each one should have a documented maximum staleness.
+The local TTL is deliberately brief. When instances must agree within seconds, pair short TTLs with invalidation events sent after the database commit. The layers can use different TTLs, but each should have a written limit on how stale it may get.
 
-## How it works / Step by step
+## Where it is used
 
-1. Choose the data to cache, based on read frequency and tolerance for staleness.
-2. Choose a read pattern (usually cache-aside) and a write pattern (usually evict after commit).
-3. Set TTLs with jitter, and maximum memory with an eviction policy.
-4. Add invalidation on every write path, including batch jobs and admin tools.
-5. Monitor hit rate, latency, evictions, and memory.
+- Product, pricing, and catalogue data that many instances read.
+- Session data and short-lived tokens shared across web servers.
+- Results of costly queries that several users request at the same time.
+- Rate-limit counters and other shared counters.
 
-## Common pitfalls
+## Benefits
 
-- Relying only on TTL for correctness, then being surprised by stale data after updates.
-- Invalidating before the database commit, which lets a reader refill the cache with old data.
-- Storing very large values, which blocks the cache node and inflates network time.
-- Write-behind caching for data that cannot be lost.
-- Using a local cache in a multi-instance deployment and assuming all instances agree.
-- Forgetting the cache during schema or serialisation changes.
-- No monitoring, so a cache with 5% hit rate goes unnoticed.
+- All instances see the same cached values, so answers stay consistent across the fleet.
+- The database handles fewer reads, which protects it under load.
+- A TTL bounds how long a stale value can survive, even when invalidation fails.
+- Event-driven invalidation can keep many caches in step with the data.
+
+## Cons and limits
+
+- Every lookup pays a network round trip, which a local cache avoids.
+- The cache is one more system to run, monitor, and secure.
+- Races between readers and writers can store stale values, so perfect consistency costs too much to pursue.
+- A hot key can overload a single node.
+- Invalidation logic is spread across every write path, so one path is easy to miss.
+
+### Common pitfalls
+
+- Treating TTL as the only correctness mechanism, then being caught out by stale data after an update.
+- Invalidating before the commit, which lets a reader refill the cache with outdated data.
+- Storing very large values, which ties up the cache node and inflates network time.
+- Choosing write-behind for data that must never be lost.
+- Running a local cache across several instances while expecting them to agree.
+- Forgetting the cache when a schema or serialisation format changes.
+- Running without monitoring, so a cache with a 5 percent hit rate goes unnoticed.
+
+## Best practices
+
+- Use cache-aside with eviction after commit as the default.
+- Add TTLs with jitter to every entry, as a safety net for missed invalidations.
+- Publish invalidation events after commit when several instances or caches are involved.
+- Guard hot keys against stampedes with single-flight loading or early refresh.
+- Restrict admin cache-clear endpoints, and log every call.
+- Write down the maximum staleness each cache is allowed to show.
 
 !!! tip "Interview tip"
     **Q: How do you keep a cache consistent with the database?**
-    You cannot make it perfectly consistent without costly coordination, so you bound staleness. Use cache-aside with eviction after commit, add TTLs with jitter as a backstop, publish invalidation events after commit when several instances or caches are involved, and protect hot keys from stampedes. State what staleness the business accepts.
+    Accept bounded staleness instead of chasing perfect agreement. Evict after commit with cache-aside, rely on jittered TTLs as the fallback, send invalidation events post-commit when several caches or instances are involved, and shield hot keys. Finish by naming the staleness the business can tolerate.
 
 ## Quick recap
 
-- Shared caches (Redis, Memcached) avoid the inconsistency of per-instance caches.
-- Cache-aside with eviction after commit is the usual default; write-through and write-behind have different trade-offs.
-- Races can store stale data; TTLs bound the damage.
-- Prevent stampedes with TTL jitter, single-flight loading, and early refresh.
-- Monitor hit rate, memory, and evictions.
+- A shared store removes the per-instance disagreement that local caches create.
+- Evict after commit by default; write-through and write-behind make different trade-offs.
+- Races can plant stale values, so TTLs set the ceiling on the damage.
+- Stampedes are prevented with TTL jitter, single-flight loads, and early refresh.
+- Track hit rate, memory use, and evictions.
 
-**See also:** [Spring Cache and Redis](spring-cache-and-redis.md) | [Performance Optimisation](performance-optimisation.md) | [Event-Driven Architecture](../13-messaging/event-driven-architecture.md)
+## Official documentation
+
+- [Redis Documentation](https://redis.io/docs/latest/)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [Spring Data JPA Reference](https://docs.spring.io/spring-data/jpa/reference/index.html)
+
+**See also:** [Spring Cache and Redis](spring-cache-and-redis.md) | [Performance Optimisation](performance-optimisation.md) | [Event-Driven Architecture](../13-messaging/event-driven-architecture.md) | [Redis Advanced Patterns](redis-advanced-patterns.md)

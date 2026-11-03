@@ -1,22 +1,37 @@
 # Secrets Management
 
-A secret is any value that grants access: database passwords, API keys, signing keys, certificates, and tokens. Secrets management is about getting them to the running application without storing them in source code, images, or logs, and about changing them when they leak. Interviewers ask about this because a committed credential is one of the most common causes of real breaches.
+!!! note "In simple words"
+    A secret is any value that unlocks something, such as a database password or an API key. Keep secrets out of your code and your logs, hand them to the app only when it starts, and change them when they might have leaked.
 
-## Core concepts
+## Why it matters
+
+A secret that leaks gives an attacker the same access your application has. Leaked credentials sit behind a large share of real breaches, and they are often found in places nobody reviews: a commit from years ago, a container image layer, a log line, or a debug endpoint. Interviewers ask about this because the correct response to a leak is a process question as much as a technical one. You need to know where secrets live, who can read them, and how they get replaced without an outage.
+
+## How it works
+
+A secret moves through a short lifecycle. Each stage has a control that limits the damage if something goes wrong.
+
+1. The secret is created inside a secrets store, with a policy that names the services allowed to read it.
+2. The application starts and proves its identity to the store with a workload identity, not a stored password.
+3. The store returns the secret, which is loaded into the Spring Environment or mounted as a file.
+4. The application uses the secret and never writes it to logs, images, or source code.
+5. When the secret rotates, the store issues a new value, consumers reload it, and the old value is revoked.
 
 ### Rule one: never commit secrets
 
-Once a secret is in Git, assume it is compromised. Deleting the line in a later commit does not remove it from history, and clones and forks keep it. The fix is to rotate the secret, not only to edit the file.
+Git keeps history. Once a secret has been pushed, assume that everyone who can read the repository, including clones and forks, now has it. Deleting the line in a later commit removes it from the latest version only. The real fix is to rotate the secret. Editing the file comes second.
 
 Practical defences:
 
-- Keep local config files with credentials out of Git (`.gitignore`).
-- Run secret scanning in pull requests and on the server side, so commits with credentials are blocked.
-- Use `.env.example`-style templates that contain placeholders, not values.
+- Keep local configuration files that hold credentials out of Git, using `.gitignore`.
+- Run secret scanning both before the push and on the server, so a commit that contains a credential is rejected.
+- Commit template files that show the required keys with placeholder values, never real values.
 
-### Config from the environment
+### Configuration from the environment
 
-The twelve-factor approach stores config in environment variables, which keeps secrets out of the artefact. Spring Boot maps environment variables to properties with relaxed binding, so `DB_PASSWORD` can supply `spring.datasource.password` or a custom property.
+The twelve-factor method keeps configuration in the environment, so the built artefact stays the same across environments. Spring Boot's relaxed binding maps environment variables to properties. A variable named `DB_PASSWORD` can supply `spring.datasource.password`, or a custom property you define.
+
+*Spring Boot example (library code, not compiled here).*
 
 ```java
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -24,8 +39,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.db")
 public record DbProperties(String url, String username, String password) {
 
-    // Records generate toString() from every component, which would print the password.
-    // Override it so logs and error messages never show the value.
+    // A record's generated toString() prints every component, including the password.
+    // Override it so logs and error messages show a mask instead.
     @Override
     public String toString() {
         return "DbProperties[url=" + url + ", username=" + username + ", password=****]";
@@ -33,46 +48,46 @@ public record DbProperties(String url, String username, String password) {
 }
 ```
 
-Environment variables are better than files in the repository, but they are still visible to anyone who can inspect the process or its deployment definition. They are a starting point, not the end state.
+Environment variables beat files in the repository, but they are still visible to anyone who can inspect the process or the deployment definition. Treat them as a step toward a secrets store, not the destination.
 
 ### Dedicated secrets stores
 
-A secrets manager encrypts secrets at rest, controls who can read them with access policies, records who accessed them, and supports rotation.
+A secrets manager encrypts values at rest, limits access through policies, records each read, and supports rotation. Common choices:
 
 | Store | Notes |
 |---|---|
-| HashiCorp Vault | Self-hosted or managed; dynamic credentials and leases |
-| AWS Secrets Manager | Managed AWS service; rotation with supported integrations |
-| Azure Key Vault | Managed Azure service; keys, secrets, and certificates |
-| Spring Cloud Vault | Spring integration that reads secrets from Vault into the Spring Environment |
+| HashiCorp Vault | Self-hosted or managed. Offers dynamic credentials with leases |
+| AWS Secrets Manager | Managed service on AWS. Rotation works with supported integrations |
+| Azure Key Vault | Managed service on Azure. Stores keys, secrets, and certificates |
+| Spring Cloud Vault | Reads secrets from Vault into the Spring Environment |
 
-Spring Boot 3 can import external configuration with `spring.config.import`, which lets a secret source feed properties at startup. Spring Cloud Vault builds on this for HashiCorp Vault. Check the current Spring Cloud documentation for the exact property names, because they change between releases.
+Spring Boot 3 imports external configuration through `spring.config.import`, so a secret source can supply properties at startup. Spring Cloud Vault builds on that mechanism for HashiCorp Vault. Property names change between releases, so check the current Spring Cloud documentation before you copy them.
 
 ### Kubernetes Secrets
 
-Kubernetes `Secret` objects store values base64-encoded. Base64 is an encoding, not encryption. Unless encryption at rest is enabled for the cluster's data store, the values are readable by anyone with API access to the cluster. Restrict RBAC on Secret objects, and consider an external secrets operator that syncs from a managed store. Containers are covered in [Kubernetes](../16-kubernetes/index.md).
+A Kubernetes `Secret` stores its values base64-encoded. Base64 is an encoding, so it hides nothing. Unless encryption at rest is turned on for the cluster's data store, anyone with API read access to the Secret can decode it. Restrict RBAC on Secret objects. Consider an external secrets operator that syncs values from a managed store into the cluster. Container topics are covered in [Kubernetes](../16-kubernetes/index.md).
 
 ### Least privilege and short-lived credentials
 
-Give each service its own credentials with only the permissions it needs. A payments service should not read the user-profile database password. Where possible, use short-lived credentials (dynamic database users, cloud IAM roles, workload identity) so there is nothing long-lived to steal.
+Give each service its own credential with only the permissions it needs. A payments service has no reason to read the user-profile database password. Where possible, use credentials that expire on their own, such as dynamic database users, cloud IAM roles, or workload identity. A credential that expires leaves less to steal.
 
 ### Rotation
 
-Rotation replaces a secret on a schedule or after an incident. Plan it so that rotation does not cause downtime:
+Rotation replaces a secret on a schedule or after an incident. Plan it so it causes no downtime:
 
-1. Create the new secret and make it valid alongside the old one.
-2. Deploy consumers so they pick up the new value (restart or refresh).
-3. Revoke the old secret once nothing uses it.
+1. Create the new secret, and make it valid alongside the old one.
+2. Move consumers to the new value by restarting them or through a tested refresh path.
+3. Revoke the old secret after nothing uses it.
 
-For signing keys (such as JWT keys), publish the new public key before signing with it, and keep the old key valid until tokens signed with it have expired.
+Signing keys, such as the keys behind JWTs, need the same care. Publish the new public key before you sign with it, and keep the old key valid until every token signed with it has expired.
 
 ### Keeping secrets out of logs and errors
 
-Secrets leak through logs, stack traces, metrics labels, and error responses. Avoid logging request bodies and headers that contain credentials, mask values in configuration output, and keep actuator endpoints such as `/actuator/env` locked down (see [Actuator and API Documentation](../09-spring-boot/actuator-and-api-docs.md)).
+Secrets leak through logs, stack traces, metric labels, and error responses. Do not log request bodies or headers that carry credentials. Mask values whenever configuration is printed. Protect actuator endpoints such as `/actuator/env`, which can reveal property values. See [Actuator and API Documentation](../09-spring-boot/actuator-and-api-docs.md).
 
 ### Wiring secrets into Spring Boot
 
-Reference secrets by placeholder and do not give them defaults:
+Refer to a secret through a placeholder, and do not give it a default value:
 
 ```yaml
 spring:
@@ -82,9 +97,9 @@ spring:
     password: ${DB_PASSWORD}   # no default: startup fails if the variable is missing
 ```
 
-A default such as `${DB_PASSWORD:changeme}` is a bug waiting to happen: a missing variable silently falls back to a known password. Failing at startup is the safer behaviour.
+A default such as `${DB_PASSWORD:changeme}` is a trap. When the variable is missing, the application quietly uses a known password. Failing at startup is the safer outcome.
 
-When secrets are mounted as files (a common Kubernetes pattern), Spring Boot can import a directory as properties with `configtree`:
+When secrets are mounted as files, which is a common Kubernetes pattern, Spring Boot can read a directory with `configtree`. Each file name becomes a property key, and the file content becomes the value:
 
 ```yaml
 spring:
@@ -92,56 +107,103 @@ spring:
     import: "optional:configtree:/run/secrets/"
 ```
 
-Each file name becomes a property key, and the file content becomes its value. Mark the import `optional:` only where a missing directory is acceptable (for example, local development).
+Use the `optional:` prefix only where a missing directory is acceptable, such as on a developer's laptop.
 
 ### Rotating without downtime in practice
 
-A rotation that works in staging can still fail in production if consumers cache the old value. Check these before rotating:
+A rotation that works in staging can still break production when consumers cache the old value. Check these points before you rotate:
 
-- Every consumer reads the secret at startup or through a refresh path you have tested.
-- Connection pools that hold old credentials are recycled after the change.
-- The old credential stays valid until the last consumer has switched.
-- The rotation is recorded, with the owner and the date, so the next rotation is not a surprise.
+- Every consumer reads the secret at startup, or through a refresh path you have tested.
+- Connection pools that hold the old credential are recycled after the change.
+- The old credential stays valid until the last consumer has switched over.
+- The rotation is recorded with an owner and a date, so the next one is planned.
 
-For database passwords, many teams create a second database user, move services to it, and then disable the first one. That avoids changing the password under live connections.
+For database passwords, a common approach is to create a second database user, move services to it, and then disable the first user. That avoids changing the password under live connections.
 
 ### Scanning and prevention
 
-Prevention is cheaper than cleanup:
+Preventing a leak is cheaper than cleaning one up:
 
-- Enable secret scanning on the repository host and in CI, so a push with a credential-shaped string fails.
-- Install a local pre-commit hook for scanning, for developers who want feedback before the push.
-- Block committed `.env` files and key files by pattern in `.gitignore`.
-- Give scanning findings an owner and a process to rotate, not only an alert.
+- Turn on secret scanning in the repository host and in the CI pipeline, so a push that contains a credential-shaped string fails.
+- Offer a local pre-commit hook so developers get feedback before they push.
+- Block `.env` files and key files by pattern in `.gitignore`.
+- Give every scanning finding an owner and a rotation process. An alert with no owner is not a fix.
 
-## How it works / Step by step
+## Where it is used
 
-1. The secret is created in a secrets store, with an access policy for the service.
-2. At startup, the application (or its platform) authenticates to the store with an identity such as a workload role, not a stored password.
-3. The store returns the secret, which is loaded into the Spring Environment or mounted as a file.
-4. The application uses the secret without writing it to logs or source code.
-5. On rotation, the store issues a new value, consumers reload, and the old value is revoked.
+- Database and message broker passwords for each service.
+- API keys for third-party payment or mail providers.
+- TLS private keys and key store passwords.
+- JWT signing keys and OAuth client secrets.
+- Cloud credentials used by build pipelines.
 
-## Common pitfalls
+The flow below shows how a service receives a database credential at startup. The service never sees a password stored in its own image or repository.
 
-- Committing a secret, then "fixing" it with a new commit and assuming it is gone.
-- Storing secrets in Docker images or in build arguments that persist in image layers.
-- Printing configuration objects, including records with default `toString()`.
+```mermaid
+sequenceDiagram
+    participant App
+    participant Platform
+    participant Vault
+    App->>Platform: Start with workload identity
+    Platform->>Vault: Login with service identity token
+    Vault-->>Platform: Short-lived client token
+    Platform->>Vault: Read database credential
+    Vault-->>Platform: Credential with lease
+    Platform-->>App: Inject as environment variable or file
+```
+
+## Benefits
+
+- Secrets are not part of the source code or the image, so a code leak does not expose them.
+- A central store gives one place to audit access and to rotate.
+- Short-lived credentials limit how long a stolen value is useful.
+- Least privilege per service limits the damage from one compromised component.
+
+## Cons and limits
+
+- A secrets store is another critical system. If it is down, services may not start.
+- Injection at startup means the app must restart, or implement a refresh path, to pick up a rotated value.
+- Dynamic credentials add load on the store and need careful client handling.
+- Environment variables are still visible to anyone who can inspect the process.
+- Kubernetes Secrets need extra configuration before they are protected at rest.
+
+### Common pitfalls
+
+- Committing a secret, then fixing the file with a new commit and assuming the secret is gone.
+- Baking secrets into Docker images, or passing them as build arguments that stay in image layers.
+- Printing configuration objects, including records with the default `toString()`.
 - Sharing one database account across every service.
-- Treating base64 Kubernetes Secrets as encrypted.
-- Rotating a key in one place without updating consumers, causing an outage.
+- Treating base64-encoded Kubernetes Secrets as encrypted.
+- Rotating a key in one place without updating its consumers, which causes an outage.
 - Long-lived API keys with no owner and no expiry.
+
+## Best practices
+
+- Inject secrets at runtime from a secrets store, and keep them out of code, images, and logs.
+- Give each service its own identity and its own credential.
+- Prefer short-lived, automatically issued credentials over static ones.
+- Fail fast when a required secret is missing. Do not add defaults.
+- Run secret scanning in both pre-commit and CI.
+- Rotate on a schedule and after any suspected exposure, and test the rotation path before you need it.
+- Keep a written runbook for revoking a leaked credential.
 
 !!! tip "Interview tip"
     **Q: A developer accidentally committed a database password. What do you do?**
-    Treat the password as compromised and rotate it immediately, in the database and in every consumer. Then remove it from the repository's history if policy requires, check access logs for misuse, and add secret scanning so the next commit is blocked. Removing the line alone is not a fix.
+    Assume the credential is already in someone else's hands. Rotate it straight away, in the database and in each service that reads it. Review access logs for misuse, rewrite history if policy demands it, and turn on scanning so the next push is refused. A later commit that deletes the line does not undo the exposure.
 
 ## Quick recap
 
-- Never commit secrets; rotate any that were exposed.
-- Inject secrets at runtime from environment variables or a secrets manager.
-- Use least-privilege, short-lived credentials where possible.
-- Plan rotation so it does not cause downtime.
-- Keep secrets out of logs, errors, actuator output, and images.
+- A committed secret is compromised; rotate it rather than hoping nobody saw it.
+- Hand secrets to the process at runtime, from variables or a vault.
+- Prefer credentials that expire on their own and cover only one service.
+- Rotation should be a rehearsed procedure, not an emergency.
+- Secrets must stay out of log lines, error bodies, actuator endpoints, and image layers.
 
-**See also:** [Boot Basics and Configuration](../09-spring-boot/boot-basics-configuration.md) | [Password Security and OWASP](password-security-owasp.md) | [CI/CD Pipelines](../17-cicd/index.md)
+## Official documentation
+
+- [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [AWS Identity and Access Management User Guide](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [The Twelve-Factor App: Config](https://12factor.net/)
+
+**See also:** [Boot Basics and Configuration](../09-spring-boot/boot-basics-configuration.md) | [Password Security and OWASP](password-security-owasp.md) | [CI/CD Pipelines](../17-cicd/index.md) | [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md)

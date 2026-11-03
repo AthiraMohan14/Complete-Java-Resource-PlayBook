@@ -1,37 +1,42 @@
 # JIT Compilation and Performance Tools
 
-The just-in-time (JIT) compiler turns frequently executed bytecode into native machine code while the program runs. Class Data Sharing (CDS) cuts startup time by sharing pre-parsed class metadata, and JMH is the standard harness for measuring code correctly. Interviewers ask about these topics to see whether you can explain why Java gets faster after warm-up and how you would diagnose a slow service without guessing.
+!!! note "In simple words"
+    The JVM starts by running bytecode slowly, watches which code runs most often, and then compiles that code to fast machine code. Performance tools let you see what the program is doing while it runs.
 
----
+## Why it matters
 
-## Core concepts
+A Java service is often slow right after a deploy and faster an hour later. That change comes from the JIT compiler. If you do not understand it, you may benchmark too early, read the wrong numbers, or chase a problem that the JVM would have fixed by itself.
+
+Interviewers ask about this topic to see whether you can explain warm-up and whether you can diagnose a slow service with evidence instead of guesses.
+
+## How it works
 
 ### Interpreter first, then compiled code
 
-The JVM does not compile everything up front. It starts by interpreting bytecode, which is quick to start but slow to run. It counts how often each method and loop runs. When a method becomes "hot", the JIT compiles it to machine code and replaces the interpreted version with the compiled one.
+The JVM does not compile every method when it starts. It interprets bytecode first, which starts quickly but runs slowly. It counts how often each method and loop runs. When a method becomes hot, the JIT compiles it to machine code and replaces the interpreted version.
 
-This is why the first requests to a Java service are slower than later ones. The period before compiled code is ready is called **warm-up**.
+The time before the hot code is ready is called **warm-up**. It explains why the first requests after a restart take longer than the later ones.
 
 ### Tiered compilation: C1 and C2
 
-Since Java 8, HotSpot uses **tiered compilation** by default, with two compilers:
+Since Java 8, HotSpot uses tiered compilation by default. It has two compilers:
 
 | Compiler | Name | Goal | Behaviour |
 |---|---|---|---|
-| C1 | Client compiler | Fast compilation | Quick, light optimisations, adds profiling counters |
-| C2 | Server compiler | Peak performance | Slower to compile, aggressive optimisations based on profiling data |
+| C1 | Client compiler | Fast compilation | Quick compile with light optimizations, and it adds profiling counters |
+| C2 | Server compiler | Peak performance | Slower to compile, with aggressive optimizations based on the profile |
 
-Execution moves through tiers. Code starts in the interpreter, moves to C1 with profiling, and the hottest code is later recompiled by C2. If an assumption made by C2 becomes false (for example, a class is loaded that breaks an inlining decision), the JVM **deoptimises** the code and falls back to a lower tier.
+Code moves up through these tiers. It starts in the interpreter, moves to C1 with profiling, and the hottest code is recompiled by C2. If C2 made an assumption that later stops being true, for example after a new class is loaded, the JVM deoptimizes that code and falls back to a lower tier.
 
-### What the optimiser does
+### What the optimizer does
 
-The JIT makes decisions using runtime profiles. Common optimisations include:
+The JIT decides what to optimize from runtime profiles. Common optimizations include:
 
-- **Inlining:** replacing a method call with the method body, so the call overhead and the boundary disappear.
-- **Loop optimisations:** unrolling and hoisting invariant computations out of loops.
-- **Escape analysis:** proving that an object never leaves a method, so it can be allocated on the stack or eliminated. This is decided by the JVM and you cannot force it.
-- **Dead code elimination:** removing computations whose results are never used.
-- **Devirtualisation:** turning a virtual call into a direct call when only one implementation has been seen.
+- **Inlining.** A method call is replaced with the body of the method, which removes the call overhead.
+- **Loop optimizations.** Loops are unrolled, and computations that do not change are moved out of the loop.
+- **Escape analysis.** If an object never leaves a method, it can be allocated on the stack or removed. The JVM makes this decision, and you cannot force it.
+- **Dead code elimination.** Calculations whose results are never used are removed.
+- **Devirtualization.** A virtual call becomes a direct call when only one implementation has been seen.
 
 ```java
 public class HotLoop {
@@ -45,7 +50,7 @@ public class HotLoop {
 
     public static void main(String[] args) {
         long result = 0;
-        for (int round = 0; round < 1_000; round++) {   // sumOfSquares becomes hot and is compiled
+        for (int round = 0; round < 1_000; round++) {   // sumOfSquares becomes hot and gets compiled
             result += sumOfSquares(10_000);
         }
         System.out.println("result = " + result);
@@ -53,35 +58,35 @@ public class HotLoop {
 }
 ```
 
-To watch compilation happen, add `-XX:+PrintCompilation`. Each line shows a method being compiled at a given tier. The output format is version-specific, so use it to see that compilation occurs rather than to parse exact text.
+Add `-XX:+PrintCompilation` to see methods being compiled at each tier. The text format changes between JDK versions, so use the output to confirm that compilation happens, not to parse exact lines.
 
 ### The code cache
 
-Compiled machine code is stored in the **code cache**, a separate native memory area. If it fills up, the JVM stops compiling and prints a warning, and the application can become much slower. Its size can be set with `-XX:ReservedCodeCacheSize`. You rarely need to change it, but a `CodeCache is full` message is worth investigating.
+Compiled machine code is stored in the **code cache**, a separate block of native memory. If the cache fills up, the JVM stops compiling and prints a warning, and the application can become much slower. You can change its size with `-XX:ReservedCodeCacheSize`. Most applications never need this, but the `CodeCache is full` message is worth investigating.
 
 ### Class Data Sharing (CDS)
 
-Loading and verifying classes costs startup time. CDS stores the parsed form of classes in an archive file that the JVM maps into memory at start-up.
+Loading and verifying classes takes time at start-up. CDS stores the parsed form of classes in an archive that the JVM maps into memory when it starts.
 
-- The JDK ships a **default CDS archive** for its own classes. It is used automatically.
-- **Application CDS (AppCDS)** extends this to your application's classes.
-
-Create and use an AppCDS archive:
+- The JDK ships a **default CDS archive** for its own classes, and the JVM uses it automatically.
+- **Application CDS (AppCDS)** adds your application's classes to the archive.
 
 ```bash
 java -XX:ArchiveClassesAtExit=app.jsa -cp app.jar com.example.Main   # run once to record the archive
-java -XX:SharedArchiveFile=app.jsa -cp app.jar com.example.Main      # later runs use it
+java -XX:SharedArchiveFile=app.jsa -cp app.jar com.example.Main      # later runs use the archive
 ```
 
-The benefit is faster startup and lower memory for many small classes, which matters for short-lived processes such as command-line tools and serverless functions. The archive must match the JDK and the class path it was created with.
+CDS helps most with short-lived processes such as command-line tools and serverless functions, where start-up time is a large share of the total. The archive must match the JDK version and the class path it was created with. Otherwise the JVM ignores it.
 
 ### Ahead-of-time options
 
-Class Data Sharing and the JIT are not the only tools for startup. GraalVM native image compiles an application ahead of time to a standalone executable, trading some peak throughput and build time for very fast startup. It is a separate product with its own constraints (for example, reflection needs configuration), so mention it as an option rather than a default.
+GraalVM native image compiles an application ahead of time into a standalone executable. It starts very quickly, but it can give up some peak throughput and makes builds slower. It also needs configuration for features such as reflection. Mention it as an option when startup is the main concern, not as a default.
 
 ### JMH: measuring correctly
 
-Writing your own timing loop with `System.nanoTime()` usually gives wrong numbers. Reasons include warm-up, dead code elimination, and constant folding. The **Java Microbenchmark Harness (JMH)** handles warm-up, forks a fresh JVM, and prevents the JIT from removing the work.
+A hand-written timing loop with `System.nanoTime()` usually gives wrong numbers. Warm-up, dead code elimination, and constant folding can all distort the result. The Java Microbenchmark Harness (JMH) handles warm-up, runs each benchmark in a fresh JVM, and stops the JIT from removing the work.
+
+The example below needs the `jmh-core` dependency and its annotation processor on the build path. It is a JMH example and was not compiled here.
 
 ```java
 import java.util.concurrent.TimeUnit;
@@ -92,7 +97,6 @@ import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.State;
 
-// Compiles with the jmh-core dependency and its annotation processor on the build path.
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Thread)
@@ -102,7 +106,7 @@ public class ConcatBenchmark {
 
     @Benchmark
     public String concatWithPlus() {
-        return a + " " + b;             // returning the result stops the JIT from discarding the work
+        return a + " " + b;              // returning the result stops the JIT from discarding the work
     }
 
     @Benchmark
@@ -112,27 +116,27 @@ public class ConcatBenchmark {
 }
 ```
 
-JMH generates a main class from these annotations. Run it through the JMH uber-jar produced by your build tool, and read the reported average time and error margin. Results depend on hardware, JDK version, and load, so compare variants run on the same machine.
+JMH generates a main class from these annotations. Run the benchmark through the uber-jar that your build tool produces, and read the average time and the error margin. Results depend on hardware, JDK version, and machine load, so compare variants on the same machine.
 
 ### Diagnostic and profiling tools
 
 | Tool | What it does | Example |
 |---|---|---|
-| `jcmd` | Swiss-army knife for a running JVM: thread dumps, heap dumps, flags, JFR control | `jcmd <pid> VM.flags`, `jcmd <pid> Thread.print` |
-| `jstat` | Periodic counters for GC and class loading | `jstat -gc <pid> 1000` (every second) |
+| `jcmd` | General control of a running JVM: thread dumps, heap dumps, flags, and JFR | `jcmd <pid> VM.flags`, `jcmd <pid> Thread.print` |
+| `jstat` | Periodic counters for GC and class loading | `jstat -gc <pid> 1000` prints every second |
 | `jmap` | Heap histograms and heap dumps | `jmap -histo:live <pid>` |
-| `jstack` | Thread dump: what each thread is doing and which locks it holds | `jstack <pid>` |
-| `jconsole` | Basic JMX graphical monitor shipped with the JDK | Launch and attach to a process |
-| VisualVM | Graphical profiler and monitor; a separate download from the JDK | Heap, CPU, and thread views |
-| Java Flight Recorder (JFR) | Low-overhead event recording, analysed in JDK Mission Control | `jcmd <pid> JFR.start duration=60s filename=rec.jfr` |
+| `jstack` | Thread dump: what each thread does and which locks it holds | `jstack <pid>` |
+| `jconsole` | Basic JMX graphical monitor shipped with the JDK | Start it and attach to a process |
+| VisualVM | Graphical profiler and monitor, downloaded separately from the JDK | Heap, CPU, and thread views |
+| Java Flight Recorder (JFR) | Low-overhead event recording that you analyze in JDK Mission Control | `jcmd <pid> JFR.start duration=60s filename=rec.jfr` |
 
-Start a recording at launch:
+To record from startup, pass the flag when the application starts:
 
 ```bash
 java -XX:StartFlightRecording=duration=60s,filename=rec.jfr -jar app.jar
 ```
 
-Open `rec.jfr` in JDK Mission Control. It shows allocation hot spots, GC pauses, lock contention, and method profiles with little overhead, which makes it suitable for production.
+Open `rec.jfr` in JDK Mission Control. It shows allocation hot spots, GC pauses, lock contention, and method profiles, and the overhead is low enough for production use.
 
 ### Heap dumps and OutOfMemoryError
 
@@ -142,61 +146,84 @@ Ask the JVM to write a heap dump when it runs out of memory:
 java -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=dumps -jar app.jar
 ```
 
-Open the dump in a tool such as Eclipse MAT or VisualVM to find which objects are retained and what keeps them alive. The "dominator tree" or "path to GC root" view is usually where a leak becomes obvious. You can also take one on demand with `jcmd <pid> GC.heap_dump <file>`.
+Open the dump in a tool such as Eclipse MAT or VisualVM. Look at the dominator tree or the path to the GC root to see which objects are kept alive and by what. You can also take a dump on demand with `jcmd <pid> GC.heap_dump <file>`.
 
 ### A diagnostic workflow
 
-When a service is slow, a reliable order of checks is:
+When a service is slow, check things in this order:
 
-1. Confirm the symptom with metrics: latency percentiles, CPU, heap, and GC pause time.
-2. Take a few thread dumps (`jstack` or `jcmd Thread.print`) a few seconds apart. Threads that stay in the same state point to a bottleneck such as a lock or a blocking call.
-3. Check GC behaviour (`jstat -gc` or GC logs; see [Garbage Collection](garbage-collection.md)).
-4. Record with JFR for allocation and CPU hot spots.
-5. Change one thing, measure again, and keep only changes that improve the metric you care about.
+1. Confirm the symptom with metrics: latency percentiles, CPU use, heap use, and GC pause time.
+2. Take several thread dumps with `jstack` or `jcmd Thread.print`, a few seconds apart. A thread that stays in the same state points to a lock or a blocking call.
+3. Check GC behaviour with `jstat -gc` or GC logs (see [Garbage Collection](garbage-collection.md)).
+4. Record with JFR to find allocation and CPU hot spots.
+5. Change one thing, measure again, and keep only the changes that improve the metric you care about.
 
----
+```mermaid
+flowchart TD
+    A[Confirm symptom with metrics] --> B[Take several thread dumps]
+    B --> C{Same thread stuck}
+    C -- yes --> D[Look at the lock or blocking call]
+    C -- no --> E[Check GC logs and jstat]
+    E --> F{Long pauses}
+    F -- yes --> G[Tune GC or shrink live data]
+    F -- no --> H[Record JFR for hot spots]
+    D --> I[Change one thing and measure]
+    G --> I
+    H --> I
+```
 
-## How it works / Step by step
+## Where it is used
 
-1. The class loader loads a class, and the interpreter starts running its bytecode.
-2. The JVM profiles invocation counts and branch behaviour.
-3. A method crossing a threshold is queued for C1 compilation with profiling.
-4. Very hot code is recompiled by C2 using the profile, with inlining and other optimisations.
-5. If an assumption breaks, the JVM deoptimises the method and returns to the interpreter or a lower tier.
-6. Compiled code lives in the code cache; the interpreter handles anything not yet compiled.
+- **Latency-sensitive services** use JIT warm-up numbers to decide when a deploy is safe to receive full traffic.
+- **Benchmark suites** use JMH to compare library choices, such as two JSON parsers or two string-building methods.
+- **Command-line tools and serverless functions** use AppCDS or native images to cut start-up time.
+- **Production support teams** use JFR and thread dumps to explain a slow request without restarting the process.
 
-| Phase | Typical cost | Notes |
-|---|---|---|
-| Interpreted | Slowest | Used at first and for cold code |
-| C1 | Medium | Fast to produce, profiles for C2 |
-| C2 | Fastest | Built from profiles; may take time to compile |
+## Benefits
 
----
+- **Speed where it matters.** The JIT spends its effort on the code that runs most, so the final speed is close to a native program for hot paths.
+- **Adaptive.** Profiles come from the real workload, so the compiled code fits the traffic the service actually receives.
+- **Low-overhead tooling.** JFR and `jcmd` are safe to use in production.
 
-## Common pitfalls
+## Cons and limits
 
-- Benchmarking with a hand-written loop and `System.nanoTime()` and trusting the numbers. Use JMH, and return or consume the results.
-- Measuring only the first few seconds of a service. Include warm-up before you compare.
-- Running with `-Xint` (interpreter only) to "see the real cost". The result describes an unrealistic configuration.
-- Assuming escape analysis will remove an allocation you want removed. The JVM decides, and it may change between versions.
-- Ignoring the `CodeCache is full` warning.
-- Taking a single thread dump and drawing conclusions. Take several to see what is stuck.
-- Creating an AppCDS archive with one JDK and running with another. The archive is rejected or ignored.
-- Using `System.gc()` before a measurement. It adds a collection that the real workload would not have had.
+- **Warm-up cost.** The first requests run slower, and short runs may never reach peak speed.
+- **Hard to predict.** Escape analysis, inlining, and deoptimization depend on the profile, so behaviour can change between JDK versions.
+- **Benchmarks are easy to get wrong.** A naive timing loop can measure the JIT rather than the code.
+- **AOT and CDS have limits.** CDS archives must match the JDK, and native images need configuration for reflection.
+
+## Best practices
+
+- Measure after warm-up. For benchmarks, use JMH rather than a hand-written loop.
+- Return or consume the result of each benchmarked call, so the JIT cannot remove the work.
+- Do not run with `-Xint` to see "the real cost". That runs an interpreter-only JVM, which is not how the service runs.
+- Take several thread dumps, not one, before you draw a conclusion.
+- Use the same JDK, flags, and machine for the before and after numbers.
+- Do not assume escape analysis will remove an allocation. Reduce allocations in the code when they matter.
+- Investigate the `CodeCache is full` warning rather than ignoring it.
+- Do not call `System.gc()` before a measurement. It adds a collection that the real workload would not have.
+- Create an AppCDS archive with the same JDK that runs the application.
 
 !!! tip "Interview tip"
     **Q: Why does a Java service get faster after it has been running for a while?**
-    The JVM starts by interpreting bytecode, then profiles it. Hot methods are compiled by C1 and, if they stay hot, by C2 using the runtime profile. Inlining, loop optimisation, and devirtualisation then apply. This is why benchmarks need warm-up and why the first requests after a deploy are slower.
+    The JVM starts by interpreting bytecode and profiling it. Hot methods are compiled by C1 and, if they stay hot, by C2 using the runtime profile. Inlining, loop optimizations, and devirtualization then apply. This is why benchmarks need warm-up and why the first requests after a deploy are slower.
 
     **Follow-up: How would you find out why a service is slow in production?**
-    Start with metrics to confirm where the time goes. Then take a few thread dumps with `jstack` or `jcmd`, check GC pauses with `jstat -gc` or GC logs, and record a JFR file for hot spots. Change one thing at a time and measure again.
+    Start with metrics to see where the time goes. Take several thread dumps with `jstack` or `jcmd`, check GC pauses with `jstat -gc` or GC logs, and record a JFR file for hot spots. Change one thing at a time and measure again.
 
 ## Quick recap
 
-- The JVM interprets first, then compiles hot code with C1 and C2 using runtime profiles (tiered compilation is the default).
-- CDS, including AppCDS, stores pre-parsed classes to reduce startup time.
-- JMH handles warm-up and dead code elimination, which makes it the right tool for microbenchmarks.
+- The JVM interprets first, then compiles hot code with C1 and C2 using runtime profiles. Tiered compilation is the default.
+- CDS and AppCDS store pre-parsed classes to cut start-up time.
+- JMH handles warm-up and dead code elimination, so it is the right tool for microbenchmarks.
 - `jcmd`, `jstat`, `jmap`, `jstack`, `jconsole`, VisualVM, and JFR cover most production diagnosis.
-- Diagnose with evidence: metrics first, then thread dumps, GC data, and recordings, and change one thing at a time.
+- Diagnose with evidence: metrics first, then thread dumps, GC data, and recordings. Change one thing at a time.
+
+## Official documentation
+
+- [Java SE 21 Garbage Collection Tuning Guide](https://docs.oracle.com/en/java/javase/21/gctuning/)
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [JEP index (OpenJDK)](https://openjdk.org/jeps/)
+- [Dev.java, the Java developer site](https://dev.java/)
 
 **See also:** [JVM Architecture and Memory](jvm-architecture-memory.md), [Garbage Collection](garbage-collection.md), [Class Loading](class-loading.md), [JVM Internals index](index.md)

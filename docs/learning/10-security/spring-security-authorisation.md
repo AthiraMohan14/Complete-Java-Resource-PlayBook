@@ -1,22 +1,51 @@
 # Spring Security: Filter Chain, Authorisation, and Method Security
 
-Spring Security protects an application by running every request through a chain of servlet filters before it reaches your controllers. Authentication establishes who the caller is, and authorisation decides what that caller may do. Interviewers ask about this because most security bugs in Spring apps come from misunderstanding the filter chain, the rule order, or where method security applies.
+!!! note "In simple words"
+    Spring Security checks every request before your controller sees it. It first works out who the caller is, then decides whether that caller may do the action. Failing the first check returns 401, and failing the second returns 403.
 
-## Core concepts
+## Why it matters
+
+Most security bugs in Spring applications come from misreading the filter chain, getting the rule order wrong, or assuming method security applies in places where it does not. An interviewer who asks about these topics wants to hear that you know where the checks run, what order they run in, and what happens when one fails.
+
+## How it works
+
+A request moves through a fixed sequence before it reaches application code. Understanding that sequence explains almost every behaviour you will see.
+
+1. The servlet container hands the request to `DelegatingFilterProxy`, a standard servlet filter that delegates to a Spring bean.
+2. `FilterChainProxy` picks the first `SecurityFilterChain` whose request matcher fits the URL.
+3. That chain runs its filters in order: CSRF protection, authentication (basic, form, or bearer token), and then the authorisation check.
+4. If authentication is missing or fails, the entry point returns `401`. If authorisation fails, the access-denied handler returns `403`.
+5. On success, the `Authentication` object sits in the `SecurityContext` and the request reaches the `DispatcherServlet` and your controller.
+6. Method-level annotations are checked when a secured bean's method is called through its Spring proxy.
+
+The sequence below shows a login request that carries credentials, followed by a request that uses the stored authentication.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Chain as Security filter chain
+    participant AM as Authentication manager
+    participant Ctx as Security context
+    participant Ctrl as Controller
+    Client->>Chain: Login request with credentials
+    Chain->>AM: Authenticate credentials
+    AM-->>Chain: Authenticated principal and authorities
+    Chain->>Ctx: Store authentication for this request
+    Chain->>Ctrl: Allowed request
+    Ctrl-->>Client: Response
+    Client->>Chain: Later request without a valid credential
+    Chain-->>Client: 401 from the entry point
+```
 
 ### Authentication versus authorisation
 
-Authentication answers "who are you?", usually by checking a password, token, or certificate. Authorisation answers "are you allowed to do this?", by checking roles, authorities, or ownership. A request can be authenticated and still be forbidden: the server returns `401` when authentication is missing or invalid, and `403` when the caller is known but not permitted.
-
-### The filter chain
-
-When a request arrives, the servlet container calls a `DelegatingFilterProxy` registered as a servlet filter. It hands the request to Spring's `FilterChainProxy`, which selects the first `SecurityFilterChain` whose request matcher fits and runs its filters in order. Those filters include CSRF protection, the authentication filters (basic, form, bearer token), and the authorisation check. Only then does the request reach your `DispatcherServlet` and controllers.
-
-The roadmap calls this a "DispatcherFilter pattern"; the Spring classes to know are `DelegatingFilterProxy` and `FilterChainProxy`. The idea is the same: one front door of filters that decides before your code runs.
+Authentication answers "who are you?", usually by checking a password, a token, or a certificate. Authorisation answers "are you allowed to do this?", using roles, authorities, or ownership of the data. A request can pass authentication and still be refused. That is the difference between `401` (the caller is unknown or the credential is invalid) and `403` (the caller is known but not permitted).
 
 ### Declaring a SecurityFilterChain
 
-Spring Security 6 removed `WebSecurityConfigurerAdapter`. You declare a `SecurityFilterChain` bean instead.
+Spring Security 6 removed `WebSecurityConfigurerAdapter`. You now declare one or more `SecurityFilterChain` beans, each with its own rules.
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.context.annotation.Bean;
@@ -43,15 +72,19 @@ class SecurityConfig {
 }
 ```
 
-Rules are evaluated top to bottom, and the first match wins. Put the most specific rules first and end with a catch-all such as `anyRequest().authenticated()`, so new endpoints are protected by default.
+Rules are checked from top to bottom, and the first match wins. Put the most specific rules first, and end with a catch-all such as `anyRequest().authenticated()`. Then any new endpoint is protected until someone deliberately opens it.
 
 ### SecurityContext, Authentication, and GrantedAuthority
 
-After successful authentication, Spring stores an `Authentication` object in the `SecurityContext`, held per thread (or per reactive context). The `Authentication` holds the principal (who), credentials (usually cleared after login), and a collection of `GrantedAuthority` values. Authorities are plain strings such as `ROLE_ADMIN` or `INVOICE_READ`. `hasRole("ADMIN")` checks for `ROLE_ADMIN`, because the `ROLE_` prefix is added for you.
+After a successful login, Spring stores an `Authentication` in the `SecurityContext`. The context is bound to the current thread, or to the reactive context in WebFlux. The `Authentication` holds the principal (who the caller is), the credentials (normally cleared after login), and a set of `GrantedAuthority` values. An authority is a string such as `ROLE_ADMIN` or `INVOICE_READ`.
+
+`hasRole("ADMIN")` checks for `ROLE_ADMIN`, because Spring adds the `ROLE_` prefix. `hasAuthority("ADMIN")` checks the exact string. Mixing the two is a common source of confusion.
 
 ### UserDetailsService and UserDetails
 
-`UserDetailsService.loadUserByUsername` loads a user by name, and `UserDetails` describes the password hash, authorities, and account status. The `DaoAuthenticationProvider` uses this service and a `PasswordEncoder` to verify credentials.
+`UserDetailsService.loadUserByUsername` loads a user by name. `UserDetails` describes the stored password hash, the authorities, and the account flags such as enabled or locked. The `DaoAuthenticationProvider` uses this service together with a `PasswordEncoder` to check credentials.
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import java.util.List;
@@ -83,26 +116,28 @@ class DbUserDetailsService implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("unknown user"));
         return User.withUsername(user.email())
                 .password(user.passwordHash())
-                .authorities(user.roles().toArray(String[]::new))   // e.g. "ROLE_ADMIN"
+                .authorities(user.roles().toArray(String[]::new))   // for example "ROLE_ADMIN"
                 .build();
     }
 }
 ```
 
-Use the stored hash in `password(...)`, never the raw password. The `authorities(...)` method takes full authority names, while `roles(...)` adds the `ROLE_` prefix for you.
+Pass the stored hash to `password(...)`, never the raw password. `authorities(...)` takes complete authority names, while `roles(...)` adds the `ROLE_` prefix for you.
 
 ### Role-based access control and fine-grained rules
 
-RBAC grants permissions through roles. It works well when roles map to clear responsibilities. Attribute-based rules (for example, "only the owner of this invoice") need the value of the resource, so they belong at method level, where you have the arguments.
+Role-based access control (RBAC) grants permissions through roles. It works well when roles map to clear job functions. Some rules depend on the data itself, such as "only the owner of this invoice may read it". Those rules need the object's values, so they belong in method security, where the arguments are available.
 
 ### Method security
 
-`@EnableMethodSecurity` (the replacement for the older `@EnableGlobalMethodSecurity`) turns on annotations on Spring beans:
+`@EnableMethodSecurity` replaces the older `@EnableGlobalMethodSecurity` and switches on method annotations for Spring beans.
 
-- `@PreAuthorize` checks before the method runs; it can use SpEL and method parameters.
-- `@PostAuthorize` checks after the method runs and can inspect `returnObject`.
+- `@PreAuthorize` is checked before the method runs. It can use SpEL and the method's parameters.
+- `@PostAuthorize` is checked after the method runs, and it can inspect `returnObject`.
 - `@Secured` checks role names only.
-- `@RolesAllowed` (JSR-250) requires enabling JSR-250 support.
+- `@RolesAllowed` comes from JSR-250, and you must enable JSR-250 support to use it.
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.security.access.prepost.PostAuthorize;
@@ -116,27 +151,30 @@ class InvoiceService {
 
     @PreAuthorize("hasAuthority('INVOICE_READ') or #ownerId == authentication.name")
     Invoice find(String ownerId, String invoiceId) {
-        return new Invoice(invoiceId, ownerId, 1200L); // load from storage here
+        return new Invoice(invoiceId, ownerId, 1200L);   // load from storage here
     }
 
     @PostAuthorize("returnObject.ownerId() == authentication.name")
     Invoice byIdForAnyone(String invoiceId) {
+        // The method has already run and loaded the data when this check happens.
         return new Invoice(invoiceId, "someone", 500L);
     }
 }
 ```
 
-Method security applies only when the call crosses the Spring proxy. A method calling another method on the same class (`this.find(...)`) skips the check. That is one of the most common mistakes.
+Method security applies only when the call passes through the Spring proxy. When one method calls another method on the same class, for example `this.find(...)`, the call bypasses the proxy and the check does not run. This is one of the most common mistakes in practice.
 
 ### Authentication providers
 
-An `AuthenticationManager` delegates to one or more `AuthenticationProvider` beans. Each provider knows how to authenticate one kind of credential, such as username and password, a JWT, or a certificate. Custom providers are the extension point when your login does not fit the defaults.
+An `AuthenticationManager` passes the credentials to one or more `AuthenticationProvider` beans. Each provider handles one kind of credential, such as a username and password, a JWT, or a certificate. A custom provider is the extension point when your login does not fit the defaults.
 
 ## Login, ownership, and error handling
 
-### A login endpoint with AuthenticationManager
+### A login endpoint that uses AuthenticationManager
 
-A login endpoint hands the submitted credentials to the `AuthenticationManager`. The manager is exposed as a bean, typically from `AuthenticationConfiguration.getAuthenticationManager()`.
+A login endpoint hands the submitted credentials to the `AuthenticationManager`. Spring exposes the manager as a bean, usually from `AuthenticationConfiguration.getAuthenticationManager()`.
+
+*Spring Boot and Spring Security example (library code, not compiled here).*
 
 ```java
 import java.util.Map;
@@ -169,10 +207,10 @@ class LoginController {
             Authentication auth = authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(
                             request.username(), request.password()));
-            // A real API issues a token here (see the authentication page)
+            // A real API issues a token at this point. See the authentication page.
             return ResponseEntity.ok(Map.of("user", auth.getName()));
         } catch (BadCredentialsException ex) {
-            // The same message for unknown users and wrong passwords
+            // The same message is returned for an unknown user and for a wrong password.
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "invalid username or password"));
         }
@@ -180,15 +218,17 @@ class LoginController {
 }
 ```
 
-Throw `BadCredentialsException`, not a generic `RuntimeException`, so the status code is correct. By default the DAO authentication provider reports an unknown user as bad credentials too, which keeps account names from leaking through the response.
+Throw `BadCredentialsException`, not a generic `RuntimeException`, so the status code is right. The DAO authentication provider also reports an unknown user as bad credentials. That keeps account names from leaking through the response.
 
 ### Ownership rules with a custom principal
 
-An expression such as `authentication.principal.id` needs the principal to have an `id` property. Spring's default `User` has none. Create a `UserDetails` implementation that exposes `getId()`, and load it in your `UserDetailsService`. Then the SpEL expression works.
+An expression such as `authentication.principal.id` needs the principal to expose an `id` property. Spring's default `User` has no such property. Create a `UserDetails` implementation with a `getId()` method, load it in your `UserDetailsService`, and the expression will work.
 
 ### Custom permission checks
 
-A `PermissionEvaluator` answers `hasPermission(...)` expressions. It is useful when the rule depends on the object's owner or state. Register it in a `MethodSecurityExpressionHandler`, or the expression fails at runtime.
+A `PermissionEvaluator` answers `hasPermission(...)` expressions. It suits rules that depend on the owner or the state of an object. Register it in a `MethodSecurityExpressionHandler`, or the expression fails at runtime.
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import java.io.Serializable;
@@ -222,6 +262,8 @@ class PostPermissionEvaluator implements PermissionEvaluator {
 }
 ```
 
+*Spring Security example (library code, not compiled here).*
+
 ```java
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -243,6 +285,8 @@ class MethodSecurityConfig {
 }
 ```
 
+*Spring Security example (library code, not compiled here).*
+
 ```java
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -257,11 +301,11 @@ class PostService {
 }
 ```
 
-The parameter name `post` in the expression is resolved from the method signature. Spring Boot's parent POM compiles with `-parameters`, so the names are available; without it, annotate the parameter with `@P("post")`.
+The expression refers to the parameter by name, `#post`. Spring Boot's parent POM compiles with `-parameters`, so those names are available at run time. Without that flag, annotate the parameter with `@P("post")`.
 
 ### Shaping responses by role
 
-Prefer separate response types for each audience over setting fields to `null` for non-admins. With separate types, a new sensitive field cannot reach the wrong audience by accident. Choose the endpoint or the response type from the caller's authorities, and keep the admin-only fields out of the public record.
+Prefer a separate response type for each audience over setting fields to `null` for non-admin callers. With separate types, a new sensitive field cannot reach the wrong audience by accident. Choose the endpoint or the response type from the caller's authorities, and keep admin-only fields out of the public type.
 
 ```java
 import java.time.Instant;
@@ -275,7 +319,9 @@ public record AdminUserView(long id, String username, String email,
 
 ### JSON errors for 401 and 403
 
-By default, Spring Security's error responses are not in your API's format. Replace the access-denied handler, and set an authentication entry point for missing or invalid credentials, so both return a Problem Details body (see [Pagination, Errors, and Idempotency](../21-api-design/pagination-errors-idempotency.md)).
+Spring Security's default error responses do not match your API's format. Replace the access-denied handler, and add an authentication entry point for missing or invalid credentials. Both should return an RFC 9457 Problem Details body. See [Pagination, Errors, and Idempotency](../21-api-design/pagination-errors-idempotency.md).
+
+*Spring Security and Spring Web example (library code, not compiled here).*
 
 ```java
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -311,11 +357,11 @@ class JsonAccessDeniedHandler implements AccessDeniedHandler {
 }
 ```
 
-Register the handler in the filter chain with `http.exceptionHandling(ex -> ex.accessDeniedHandler(handler))`. Write a matching `AuthenticationEntryPoint` for `401`, using the same pattern.
+Register the handler with `http.exceptionHandling(ex -> ex.accessDeniedHandler(handler))`. Write an `AuthenticationEntryPoint` for `401` in the same way.
 
 ### Auditing access with AOP
 
-An aspect can record who called a sensitive method. Put the annotation on the method and let the aspect read the caller from the `SecurityContext`.
+An aspect can record who called a sensitive method. You mark the method with an annotation, and the aspect reads the caller from the `SecurityContext`.
 
 ```java
 import java.lang.annotation.ElementType;
@@ -328,6 +374,8 @@ import java.lang.annotation.Target;
 @interface Audited {
 }
 ```
+
+*Spring AOP example (library code, not compiled here).*
 
 ```java
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -355,36 +403,66 @@ class AuditAspect {
 }
 ```
 
-The aspect needs `spring-boot-starter-aop`. Log only identifiers, never request bodies or secrets. For compliance, write to a protected audit table rather than an ordinary application log. Also decide whether to record before or after the call; this example records before it, so a failed call is still logged.
+The aspect needs `spring-boot-starter-aop`. Log identifiers only, never request bodies or secrets. For compliance, write to a protected audit table rather than to an ordinary application log. Decide whether to record before or after the call. This example records before it runs, so a failed call still leaves a trace.
 
-## How it works / Step by step
+## Where it is used
 
-1. The request enters `DelegatingFilterProxy`, then `FilterChainProxy`.
-2. The matching `SecurityFilterChain` runs its filters: CSRF check, authentication (for example, basic auth or bearer token), then the authorisation check.
-3. If authentication is missing, the entry point returns `401`. If authorisation fails, the access-denied handler returns `403`.
-4. On success, the `Authentication` is placed in the `SecurityContext`, and the request reaches the controller.
-5. Method-level annotations are checked when a secured bean's method is called through its proxy.
+- Admin consoles that must be locked to a specific role.
+- Multi-user applications where each person may see only their own records.
+- Internal APIs that enforce permissions through method security.
+- Regulated systems that must record who did what and when.
 
-## Common pitfalls
+## Benefits
+
+- Deny-by-default rules protect new endpoints without extra work.
+- Method security keeps data rules next to the code that uses the data.
+- The filter chain runs before any controller code, so one mistake in a controller cannot skip the checks.
+- Custom evaluators let the rules express business ownership clearly.
+
+## Cons and limits
+
+- Rule order is easy to get wrong, and a broad rule above a specific one can silently make the specific rule unreachable.
+- Method security works only through the proxy, so self-invocation bypasses it.
+- `@PostAuthorize` runs after the data has been loaded, so it does not prevent the load itself.
+- Complex expressions in annotations are hard to read and test.
+- A single rule set for many clients can grow until nobody understands it.
+
+### Common pitfalls
 
 - Relying on the front end to hide buttons. Every endpoint must check on the server.
-- Rule order mistakes: a broad `permitAll()` placed before a specific `hasRole` rule makes the specific one unreachable.
-- Using `hasRole("ROLE_ADMIN")`, which checks for `ROLE_ROLE_ADMIN`.
+- Putting a broad `permitAll()` above a specific `hasRole` rule, which makes the specific rule unreachable.
+- Writing `hasRole("ROLE_ADMIN")`, which checks for `ROLE_ROLE_ADMIN`.
 - Forgetting `@EnableMethodSecurity`, so `@PreAuthorize` annotations are silently ignored.
-- Self-invocation, which bypasses method security (see above).
-- Leaking data in `@PostAuthorize`: the method has already run and loaded the data.
-- Exposing internal details in `403` or `401` responses.
+- Calling a secured method from the same class, which bypasses method security.
+- Leaking data through `@PostAuthorize`, because the method has already loaded it.
+- Exposing internal details in `401` or `403` responses.
+
+## Best practices
+
+- Declare a `SecurityFilterChain` bean and end every chain with `anyRequest().authenticated()`.
+- Enable method security with `@EnableMethodSecurity`, and use `@PreAuthorize` for ownership rules.
+- Use `hasRole` with plain role names, and `hasAuthority` for fine-grained permissions.
+- Write separate response types for each audience.
+- Return consistent Problem Details for `401` and `403`.
+- Add tests that call protected endpoints without credentials and with the wrong role, and assert the status codes.
 
 !!! tip "Interview tip"
     **Q: How does Spring Security decide whether a request is allowed?**
-    The request passes through a chain of filters inside `FilterChainProxy`. The first `SecurityFilterChain` whose matcher fits runs its filters: authentication populates the `SecurityContext`, and the authorisation rules check the request's authorities. Rules are ordered, so the first match wins. Method security adds a second check on the proxied bean.
+    `FilterChainProxy` picks the first chain whose matcher accepts the URL. That chain's filters establish the caller and store the result in the `SecurityContext`, and then the URL rules compare the caller's authorities with what the route demands. Rules are read in order, so the earliest match decides. Method security performs one more check on the proxied bean.
 
 ## Quick recap
 
-- Authentication identifies the caller (`401` on failure); authorisation checks permissions (`403` on failure).
-- Requests pass through `DelegatingFilterProxy` into `FilterChainProxy` and a `SecurityFilterChain`.
-- Declare a `SecurityFilterChain` bean; Spring Security 6 has no `WebSecurityConfigurerAdapter`.
-- Use `@EnableMethodSecurity` with `@PreAuthorize` and `@PostAuthorize` for ownership and data rules.
-- Protect by default: end with `anyRequest().authenticated()`.
+- A `401` means the caller could not be identified; a `403` means the caller is known but not allowed.
+- Requests flow from `DelegatingFilterProxy` to `FilterChainProxy` and then into one `SecurityFilterChain`.
+- Spring Security 6 expects `SecurityFilterChain` beans, not `WebSecurityConfigurerAdapter` subclasses.
+- Pair `@EnableMethodSecurity` with `@PreAuthorize` and `@PostAuthorize` for data-level rules.
+- End every chain with `anyRequest().authenticated()` so that new routes default to locked.
+
+## Official documentation
+
+- [Spring Security Reference](https://docs.spring.io/spring-security/reference/index.html)
+- [Spring Framework Reference](https://docs.spring.io/spring-framework/reference/)
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html)
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 
 **See also:** [Authentication: JWT, OAuth 2.0, and OpenID Connect](authentication-jwt-oauth.md) | [Password Security and OWASP](password-security-owasp.md) | [Integration Testing](../11-testing/integration-testing.md)

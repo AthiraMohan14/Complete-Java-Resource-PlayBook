@@ -1,31 +1,65 @@
 # Authentication: JWT, OAuth 2.0, and OpenID Connect
 
-Authentication mechanisms decide how a caller proves its identity. For APIs, that usually means a bearer token; for single sign-on, it means delegating login to an identity provider. Interviewers ask about JWT, OAuth 2.0, and OpenID Connect because they are often confused. The key distinction is that OAuth 2.0 is about authorisation to call an API, while OpenID Connect adds identity on top of it.
+!!! note "In simple words"
+    Authentication means proving who you are. A JWT is a signed card that names the caller. OAuth 2.0 gives an app a key for calling an API. OpenID Connect adds a sign-in identity on top, so the app also learns which person logged in.
 
-## Core concepts
+## Why it matters
 
-### Basic auth and form login
+Each request to a protected API must answer one question: who is calling? A wrong answer lets one person act as another. JWT, OAuth 2.0, and OpenID Connect (OIDC) are often confused. The practical split is this: OAuth 2.0 governs access to an API, and OIDC tells the client who signed in. Working out which one a design needs is most of the battle.
 
-HTTP Basic sends the username and password with every request, encoded but not encrypted, so it must only be used over TLS. Form login uses a login page and a session cookie. Both are fine for internal tools and server-rendered apps, but they are session-based (or credential-based on every call), which matters for stateless APIs.
+## How it works
+
+A token-based login involves four parties: the user, a client application, an authorisation server that verifies the user, and a resource server that hosts the API.
+
+1. The user signs in at the authorisation server, using a password, a second factor, or single sign-on.
+2. The server returns a short-lived access token, usually a JWT, plus often a refresh token.
+3. The client sends the access token on every API call, in an `Authorization: Bearer` header.
+4. The resource server checks the signature, issuer, audience, and expiry, then applies its own rules.
+5. When the access token expires, the client trades the refresh token for a new pair. The old refresh token is retired.
+
+The sequence below follows a browser client through login, an API call, and a refresh.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Client as Client app
+    participant AS as Authorization server
+    participant RS as Resource server
+    Browser->>Client: Open protected page
+    Client->>Browser: Redirect to login with code challenge
+    Browser->>AS: Authenticate user
+    AS-->>Browser: Redirect back with authorization code
+    Browser->>Client: Authorization code
+    Client->>AS: Exchange code with code verifier
+    AS-->>Client: Access token and refresh token
+    Client->>RS: API call with bearer access token
+    RS-->>Client: Protected data
+    Client->>AS: Refresh with refresh token
+    AS-->>Client: New access token and rotated refresh token
+```
+
+### Basic authentication and form login
+
+HTTP Basic sends a username and password with every request. The values are base64-encoded, which hides nothing, so Basic must run only over TLS. Form login pairs a sign-in page with a session cookie. Both suit internal tools and server-rendered pages, but both depend on server-side state or repeated credential checks, which fits stateless APIs poorly.
 
 ### JWT (JSON Web Tokens)
 
-A JWT has three base64url-encoded parts separated by dots: a header (algorithm and token type), a payload (claims such as `sub`, `iss`, `aud`, `exp`, and custom claims), and a signature computed over the first two parts.
+A JWT is three base64url segments separated by dots. The header names the signing algorithm. The payload holds claims: `sub` (subject), `iss` (issuer), `aud` (audience), `exp` (expiry), and any custom claims. The signature covers the first two segments.
 
 ```text
 eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEiLCJleHAiOjE3MDAwMDAwMDB9.<signature>
 ```
 
-Key points:
+- Anyone holding a JWT can read its payload, so never put a secret in one.
+- The signature shows that the content was not altered. It does not hide the content, and the verifier must use the expected key.
+- Check `iss`, `aud`, `exp`, and the algorithm. Reject `none`, and never accept whatever algorithm the header claims.
+- Verification needs no lookup, which makes revocation hard. Keep access tokens short-lived.
 
-- The payload is readable by anyone who holds the token. Do not put secrets in it.
-- The signature proves integrity, not secrecy. The server must verify it with the expected key.
-- Validate `iss` (issuer), `aud` (audience), `exp` (expiry), and the algorithm. Reject tokens signed with `none`, and never accept whatever algorithm the token header claims.
-- Stateless validation means the server does not look up a session, so revoking a token before it expires is hard. Keep access tokens short-lived.
+A refresh token lasts longer, and it exists only to mint new access tokens. Rotate it on every use, and bind it to the client that received it.
 
-A refresh token is a longer-lived credential used only to obtain new access tokens. Rotate refresh tokens on use, and bind them to the client.
+Spring Boot 3 acts as a JWT resource server once `spring-boot-starter-oauth2-resource-server` is on the classpath. Setting the issuer URI is enough for Spring to fetch the signing keys and validate tokens.
 
-Spring Boot 3 can act as a JWT resource server. It needs a `JwtDecoder` (configured here from an issuer URI) and the `spring-boot-starter-oauth2-resource-server` dependency.
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.context.annotation.Bean;
@@ -49,56 +83,40 @@ class ResourceServerConfig {
 }
 ```
 
-With `spring.security.oauth2.resourceserver.jwt.issuer-uri` set, Spring fetches the issuer's signing keys and validates the token's signature and standard claims.
+### Where to keep tokens in a browser
 
-### Where to store tokens in a browser
-
-`localStorage` is readable by any script on the page, so one XSS bug can steal the token. An `HttpOnly`, `Secure`, `SameSite` cookie is not readable by scripts, but it is sent automatically, which brings CSRF into play (see [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md)). There is no single perfect answer; the choice is a trade-off you should be able to explain.
+`localStorage` is readable by every script on the page, so a single cross-site scripting flaw exposes the token. A cookie marked `HttpOnly`, `Secure`, and `SameSite` is invisible to scripts, but the browser attaches it automatically, which brings CSRF into play. See [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md). Neither option is flawless, so be ready to defend your choice.
 
 ### OAuth 2.0
 
-OAuth 2.0 is a delegation framework. A client obtains an access token from an authorisation server and uses it to call a resource server. Common grants:
+OAuth 2.0 is a delegation framework. A client receives an access token from an authorisation server and presents it to a resource server. Grant types you will encounter:
 
-- **Authorisation code with PKCE**: for browser apps and mobile apps (public clients). PKCE (Proof Key for Code Exchange) prevents an intercepted code from being used by someone else.
-- **Client credentials**: for service-to-service calls where no user is involved.
-- **Resource owner password grant**: removed in OAuth 2.1. Avoid it in new designs.
+- **Authorisation code with PKCE** for browser and mobile apps, which cannot hold a secret. PKCE (Proof Key for Code Exchange) makes an intercepted code useless without the matching verifier.
+- **Client credentials** for service-to-service calls with no end user.
+- **Resource owner password grant**, removed in OAuth 2.1 and not to be used in new designs.
+- **Implicit grant**, which returned tokens in the browser URL. It is deprecated, so use the code grant with PKCE instead.
 
-Spring Boot's OAuth2 client support is configured under `spring.security.oauth2.client.registration.<id>`, and the authorisation server can be one you run (for example, with the Spring Authorization Server project) or a hosted provider. Microsoft Entra ID (formerly Azure AD) is an example of a hosted provider.
+Spring Boot configures OAuth 2.0 clients under `spring.security.oauth2.client.registration.<id>`. The authorisation server can be one you run, for example through Spring Authorization Server, or a hosted product such as Microsoft Entra ID (formerly Azure AD).
 
 ### OpenID Connect
 
-OpenID Connect (OIDC) is an identity layer on top of OAuth 2.0. Requesting the `openid` scope returns an ID token: a JWT that tells the client who authenticated and when. The user info endpoint returns more profile claims for the access token. Use the ID token to establish identity and the access token to call APIs; do not send ID tokens to resource servers as if they were access tokens.
+OIDC sits on top of OAuth 2.0. Requesting the `openid` scope adds an ID token, a JWT that states who signed in and when. The user info endpoint returns more profile claims for the access token.
 
-Spring Security supports OIDC login with `oauth2Login()`, which maps the identity to the `SecurityContext`.
+Read the ID token to learn who signed in, and send the access token when calling APIs. An ID token is addressed to the client, so sending it to a resource server as if it were an access token is a mistake.
 
-### SAML
+Spring Security supports OIDC login through `oauth2Login()`, which places the authenticated identity into the `SecurityContext`.
 
-SAML 2.0 exchanges XML assertions between an identity provider and a service provider. It is common in enterprise single sign-on, especially in older systems. Spring Security supports SAML 2.0 service-provider login (`saml2Login()`). Most new APIs choose OIDC instead, but you will meet SAML in enterprise integrations.
+### SAML and multi-factor authentication
 
-### Multi-factor authentication
+SAML 2.0 passes signed XML statements between an identity provider and a service provider. It remains common in enterprise single sign-on, and Spring Security supports it through `saml2Login()`. Newer APIs usually choose OIDC.
 
-MFA combines factors: something you know (password), something you have (a device), or something you are. Common second factors:
+Multi-factor authentication (MFA) adds a factor from another category to the password. Typical second factors are TOTP codes from an authenticator app (RFC 6238), which are a solid default; push approvals, which users can be tricked into accepting; and SMS codes, which are weaker because of SIM swapping and interception. Spring Security does not ship a full MFA product, so MFA usually comes from the identity provider or a dedicated library.
 
-- TOTP (time-based one-time codes, RFC 6238), from an authenticator app. Generally a strong choice.
-- Push notifications: convenient, but users can be tricked into approving unexpected prompts.
-- SMS: weaker, because of SIM-swap and interception risks.
+### Checking issuer, audience, and expiry together
 
-Spring Security does not ship a full MFA product, so MFA is usually added through an identity provider or a dedicated library.
+The default JWT validator covers the signature, the issuer, and the validity window. An API should also verify the audience. The `aud` claim says which resource a token was minted for, so a token issued for a different API must be refused even if its signature is valid.
 
-## Comparison
-
-| Mechanism | Typical use | Key risk |
-|---|---|---|
-| Basic auth | Internal tools, quick scripts | Credentials on every request; needs TLS |
-| Session cookie | Server-rendered web apps | CSRF; session storage at scale |
-| JWT bearer | Stateless APIs | Hard to revoke; token leakage |
-| OAuth 2.0 + PKCE | Browser and mobile apps calling APIs | Misconfigured redirect URIs |
-| OIDC | User login and single sign-on | Using ID tokens as API tokens |
-| SAML | Enterprise single sign-on | XML complexity; certificate rotation |
-
-### Validating issuer, audience, and expiry together
-
-The default JWT validation checks the signature and the timestamps. An API should also check that the token was meant for it. The audience (`aud`) claim names the intended resource, and a token issued for another API must be rejected even when its signature is valid.
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.context.annotation.Bean;
@@ -132,25 +150,17 @@ class JwtConfig {
 }
 ```
 
-The default validator checks the issuer and the time window (`exp`, `nbf`). The custom audience check adds the part the default does not know about. Custom claims such as roles or tenant IDs follow the same pattern, and should be checked on the server, never trusted because the client sent them.
+The default validator checks the issuer and the `exp` and `nbf` times. The audience rule adds what the default cannot know. Custom claims such as roles or a tenant ID should be checked on the server, never accepted just because the client sent them.
 
 ## Sessions versus JWTs
 
-Server-side sessions and JWTs both carry a logged-in user between requests, but they store the state in different places. The choice mostly comes down to revocation and scaling.
-
-| Aspect | Server-side session | JWT |
-|---|---|---|
-| Where the state lives | On the server, keyed by a session ID | In the token itself |
-| Logout or revocation | Immediate: delete the session | Needs a deny-list or a short lifetime |
-| Scaling | Needs a shared session store or sticky routing | Any instance can verify the token |
-| Size on each request | A small session ID cookie | A longer token sent with every call |
-| Fit | Server-rendered web apps | APIs, single-page apps, mobile apps, service-to-service calls |
-
-Sessions suit server-rendered applications where an immediate logout matters. JWTs suit stateless APIs. Neither is better in every case, so explain the trade-off rather than naming a winner.
+A server-side session keeps state on the server, so logout is immediate, but scaling needs a shared store or sticky routing. A JWT keeps state inside the token, so any instance can verify it, but revocation needs a deny-list or a short lifetime. Sessions suit server-rendered apps that need instant logout, and JWTs suit stateless APIs.
 
 ## Issuing and verifying your own JWT
 
-When you issue tokens yourself, the JJWT library (version 0.12 and later) builds and parses them. The signing key must be at least 256 bits for HS256, and it must come from configuration, not from source code.
+If you mint tokens yourself, the JJWT library (version 0.12 or later) handles building and parsing. An HS256 key must be at least 256 bits, and it must come from configuration rather than source code.
+
+*JJWT library example (library code, not compiled here).*
 
 ```java
 import io.jsonwebtoken.Claims;
@@ -195,11 +205,13 @@ public class JwtIssuer {
 }
 ```
 
-Older examples use `setSigningKey(String)` and `signWith(SignatureAlgorithm, String)`. Those methods were removed in JJWT 0.12, so check the version you depend on. Catch `JwtException` in the filter that calls `verify`, and reject the request. Do not log the token itself.
+Older tutorials call `setSigningKey(String)` and `signWith(SignatureAlgorithm, String)`. JJWT 0.12 removed those methods, so check the version in your build. Catch `JwtException` wherever `verify` is called, and reject the request. Never log the token.
 
 ## A bearer token filter for stateless APIs
 
-A filter reads the `Authorization: Bearer` header, verifies the token, and places the caller in the `SecurityContext` for this request only. It runs once per request and performs no session lookup.
+The filter reads the `Authorization: Bearer` header, verifies the token, and stores the caller in the `SecurityContext` for the current request. No session is involved.
+
+*Spring Security and Servlet example (library code, not compiled here).*
 
 ```java
 import io.jsonwebtoken.Claims;
@@ -231,14 +243,15 @@ public class BearerTokenFilter extends OncePerRequestFilter {
             try {
                 Claims claims = jwtIssuer.verify(header.substring(7));
                 List<?> roles = claims.get("roles", List.class);
-                List<SimpleGrantedAuthority> authorities = (roles == null ? List.<Object>of() : roles)
-                        .stream()
-                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
-                        .toList();
+                List<SimpleGrantedAuthority> authorities = roles == null
+                        ? List.of()
+                        : roles.stream()
+                                .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                                .toList();
                 SecurityContextHolder.getContext().setAuthentication(
                         new UsernamePasswordAuthenticationToken(claims.getSubject(), null, authorities));
             } catch (JwtException | IllegalArgumentException ex) {
-                // Leave the context empty; the authorisation rules then return 401
+                // Leave the context empty; the authorisation rules will answer 401.
             }
         }
         chain.doFilter(request, response);
@@ -246,7 +259,9 @@ public class BearerTokenFilter extends OncePerRequestFilter {
 }
 ```
 
-The filter is wired into a stateless filter chain. Disabling CSRF is safe here only because this API accepts no cookie credentials (see [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md)).
+The chain below places the filter in front of the username-password filter. Disabling CSRF protection is acceptable only because this API never accepts cookies as credentials. See [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md).
+
+*Spring Security example (library code, not compiled here).*
 
 ```java
 import org.springframework.beans.factory.annotation.Value;
@@ -282,66 +297,81 @@ class ApiSecurityConfig {
 }
 ```
 
-Create the filter with `new` inside the configuration rather than making it a bean. Spring Boot registers every `Filter` bean with the servlet container as well, so a filter declared as a bean would run twice.
+Create the filter with `new` inside this configuration rather than declaring it as a bean. Spring Boot registers each `Filter` bean with the servlet container, so a bean-declared filter would run twice.
 
 ## Refresh token flow
 
-An access token lives minutes. A refresh token lives days and is used only at the token endpoint. The client trades a valid refresh token for a new access token, and the server controls whether that is allowed.
+An access token lasts minutes. A refresh token lasts days, and the token endpoint is the only place it is accepted. The server decides whether each exchange is allowed.
 
-1. Login returns a short-lived access token and a refresh token.
-2. The client calls the API with the access token until it expires.
-3. The client sends the refresh token to the refresh endpoint.
-4. The server checks that the refresh token is stored, unexpired, and unused. It marks that token as used and issues a new pair (rotation).
-5. Logout deletes the refresh token on the server, so it cannot be used again.
+1. Sign-in yields a brief access token together with a refresh token.
+2. The access token carries requests until it lapses.
+3. The client posts the refresh token to the refresh endpoint.
+4. The server verifies that the refresh token is stored, unexpired, and unspent, marks it spent, and issues a fresh pair.
+5. Logout removes the refresh token server-side, so it cannot be redeemed later.
+
+The snippet below generates refresh tokens with `SecureRandom` and keeps the types in one file to make the rotation logic visible.
 
 ```java
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
-// Minimal stand-in for the issuer described earlier on the page.
-interface JwtIssuer {
+interface AccessTokenIssuer {
     String issue(String username, List<String> roles);
 }
 
-public record TokenPair(String accessToken, String refreshToken) {}
+record TokenPair(String accessToken, String refreshToken) {
+}
 
 interface RefreshTokenStore {
 
-    /** Returns the username for an unused, unexpired token, and marks it as used. */
-    Optional<String> consume(String refreshToken);
+    /** Returns the username for an unspent, unexpired token, and marks that token as spent. */
+    Optional<String> consume(String refreshTokenHash);
 
-    void store(String refreshToken, String username, Instant expiresAt);
+    void store(String refreshTokenHash, String username, Instant expiresAt);
 }
 
 class TokenService {
 
-    private final RefreshTokenStore refreshTokens;
-    private final JwtIssuer jwtIssuer;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
-    public TokenService(RefreshTokenStore refreshTokens, JwtIssuer jwtIssuer) {
+    private final RefreshTokenStore refreshTokens;
+    private final AccessTokenIssuer accessTokens;
+
+    TokenService(RefreshTokenStore refreshTokens, AccessTokenIssuer accessTokens) {
         this.refreshTokens = refreshTokens;
-        this.jwtIssuer = jwtIssuer;
+        this.accessTokens = accessTokens;
     }
 
-    public Optional<TokenPair> refresh(String presentedRefreshToken) {
-        return refreshTokens.consume(presentedRefreshToken).map(username -> {
-            String access = jwtIssuer.issue(username, List.of());   // reload roles here
-            String next = UUID.randomUUID().toString();
-            refreshTokens.store(next, username, Instant.now().plus(Duration.ofDays(7)));
+    Optional<TokenPair> refresh(String presentedRefreshToken) {
+        return refreshTokens.consume(hash(presentedRefreshToken)).map(username -> {
+            String access = accessTokens.issue(username, List.of());   // reload roles from storage here
+            String next = newRefreshToken();
+            refreshTokens.store(hash(next), username, Instant.now().plus(Duration.ofDays(7)));
             return new TokenPair(access, next);
         });
+    }
+
+    private static String newRefreshToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String hash(String token) {
+        return Integer.toHexString(token.hashCode());   // placeholder: use SHA-256 or an HMAC in real code
     }
 }
 ```
 
-Store refresh tokens hashed, the same way you would store a password, so that a database read does not reveal usable tokens. If a token that was already used comes back, treat it as theft: revoke every refresh token for that user and require a new login.
+Store refresh tokens in hashed form, as with passwords, so a database read exposes nothing usable. The `hash` method above is a stand-in and must be replaced. A spent token showing up again is a theft signal, so revoke all of that user's refresh tokens and force a fresh sign-in.
 
 ## Logout and revocation
 
-A JWT stays valid until it expires, so logout needs a deny-list. Store the token's `jti` (the JWT ID claim) with its expiry time. Once the expiry has passed, the entry can be dropped.
+Logout cannot erase a JWT that was already issued, so it needs a deny-list. Store each revoked token's `jti` (its unique ID claim) together with its expiry time. Once that time passes, the entry is no longer needed, because the token would be rejected anyway.
 
 ```java
 import java.time.Instant;
@@ -358,75 +388,59 @@ public class TokenDenyList {
 
     public boolean isRevoked(String jti) {
         Instant until = revokedUntil.get(jti);
-        if (until == null) {
-            return false;
-        }
-        if (until.isBefore(Instant.now())) {
-            revokedUntil.remove(jti);   // the token has expired anyway
-            return false;
-        }
-        return true;
+        return until != null && until.isAfter(Instant.now());   // expired entries no longer matter
     }
 }
 ```
 
-An in-memory map works for one instance only, and it is lost on restart. With several instances, keep the deny-list in a shared store such as Redis, with a time-to-live equal to the token's remaining life. A plain `HashSet` is not safe under concurrent requests, and it grows without bound.
+An in-memory map covers one instance, and it is lost on restart. Across several instances, move the deny-list to a shared store such as Redis, with a TTL equal to the token's remaining life. A plain `HashSet` is unsafe under concurrent access and grows without limit.
 
 ## Multi-tenant claims
 
-A tenant ID in the token lets one API serve several organisations. Read it from the claims after the signature has been verified, and use it to scope every query. Never take the tenant from a request header or parameter that the client controls.
+A tenant claim lets a single API serve several organisations. Trust it only once the signature checks out, and filter every query by it. A tenant taken from a header or query parameter is client-controlled and cannot be trusted.
 
 ```java
-class TenantLookup {
+import java.util.Map;
 
-    // Stand-in for the JJWT Claims type used earlier on the page.
-    interface Claims {
-        <T> T get(String name, Class<T> type);
+public class TenantClaimDemo {
+    // Minimal stand-in for the claims object your JWT library returns
+    static class Claims {
+        private final Map<String, Object> values;
+
+        Claims(Map<String, Object> values) {
+            this.values = values;
+        }
+
+        <T> T get(String name, Class<T> type) {
+            return type.cast(values.get(name));
+        }
     }
 
-    static String tenantOf(Claims claims) {
-        // After verify(token) has succeeded
-        return claims.get("tenant_id", String.class);
+    public static void main(String[] args) {
+        Claims claims = new Claims(Map.of("tenant_id", "acme"));
+        // Read the tenant only from claims that verify(token) has already accepted.
+        String tenant = claims.get("tenant_id", String.class);
+        System.out.println(tenant);
     }
 }
 ```
 
 ## Role checks
 
-Put role rules on the handler, not in the token parser. A short example, with the full set of rules described in [Spring Security Authorisation](spring-security-authorisation.md):
+Enforce role rules on handlers, for example with `@PreAuthorize("hasRole('ADMIN')")` on a controller method, and never inside the token parser. The full rule set is covered in [Spring Security Authorisation](spring-security-authorisation.md).
 
-```java
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-@RestController
-class AdminController {
-
-    @GetMapping("/admin/users")
-    @PreAuthorize("hasRole('ADMIN')")
-    String listUsers() {
-        return "admin only";
-    }
-}
-```
-
-Roles in a JWT are a hint for the client. The server must still check them on each request, because a role may have been removed after the token was issued.
+Roles carried in a JWT are advisory for the client. The server re-checks them on each request, because a role may be withdrawn after the token was issued.
 
 ## Other authentication mechanisms
 
-- **API keys** identify a client application. Send them in a header, store only a hash on the server, and give each key a scope and an owner. A leaked key compromises everything it can reach.
-- **Mutual TLS (mTLS)** uses client certificates, so both sides authenticate. It is common between services. See [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md).
-- **HMAC request signing** proves a request came from a holder of a shared secret and was not changed. Verify the signature in constant time; the method is shown in [Password Security and OWASP](password-security-owasp.md).
-- **Session cookies** are described above; they remain the right default for server-rendered applications.
-
-## OAuth 2.0 grant types at a glance
-
-The implicit grant, which returned tokens in the browser URL for single-page apps, is deprecated; use the authorisation code grant with PKCE instead. The resource owner password grant is removed in OAuth 2.1. Client credentials serve service-to-service calls, and the refresh token grant renews access tokens, as in the flow above.
+- **API keys** identify a calling application. Keep a hash rather than the raw key on the server, attach an owner and a scope to each key, and read them from a header. A leaked key exposes whatever it can reach.
+- **Mutual TLS (mTLS)** authenticates both ends with certificates, and it is common between services. See [CORS, CSRF, TLS, and Security Headers](cors-csrf-tls-headers.md).
+- **HMAC request signing** proves that a holder of a shared secret sent an unmodified request. Compare the tag in constant time. See [Password Security and OWASP](password-security-owasp.md).
+- **Session cookies** remain the right default for server-rendered applications.
 
 ## Configuration
 
-Read signing keys and lifetimes from configuration. Do not give the secret a default value, because a missing variable would then fall back to a known key.
+Read the signing key and token lifetimes from configuration. Give the secret no default, since a missing variable would otherwise fall back to a key that anyone could guess.
 
 ```yaml
 app:
@@ -436,27 +450,65 @@ app:
     refresh-token-ttl: P7D
 ```
 
-Spring's `Duration` binding reads these ISO-8601 values. Store the secret in a secrets manager and inject it at runtime (see [Secrets Management](secrets-management.md)).
+Spring's `Duration` binding parses those ISO-8601 values. Load the secret from a vault at startup, as described in [Secrets Management](secrets-management.md).
 
-## Common pitfalls
+## Where it is used
 
-- Trusting JWT contents without verifying the signature, issuer, audience, and expiry.
-- Long-lived access tokens with no revocation path.
-- Using the implicit flow or the password grant in new designs.
-- Loose redirect URI matching, which allows authorisation codes to be redirected to attacker-controlled hosts.
-- Storing tokens in `localStorage` without accounting for XSS.
-- Logging full tokens or authorisation headers.
+- Public APIs that accept tokens from mobile and single-page clients.
+- Single sign-on across internal web applications, through OIDC.
+- Service-to-service calls that use the client credentials grant.
+- Partner integrations that receive scoped API keys or client certificates.
+
+## Benefits
+
+- Stateless verification lets any instance check a token without a session lookup.
+- OAuth 2.0 keeps the user's password away from third-party clients.
+- OIDC provides a standard way to learn identity, not just access.
+- Short-lived access tokens limit the harm from a stolen token.
+
+## Cons and limits
+
+- A JWT cannot be revoked instantly without extra state such as a deny-list.
+- Claims are frozen at issue time, so they can go stale.
+- Refresh token handling is easy to get wrong, and a bug can keep sessions alive too long.
+- Several specifications interact, and small configuration differences break validation.
+- MFA sits outside the token format, so it depends on the identity provider.
+
+### Common pitfalls
+
+- Accepting a JWT without verifying its signature, issuer, audience, and expiry.
+- Long-lived access tokens with no way to revoke them.
+- Choosing the implicit or password grant for a new design.
+- Redirect URIs matched loosely, so codes can be sent to attacker-owned hosts.
+- Keeping tokens in `localStorage` while ignoring cross-site scripting.
+- Logging whole tokens or authorisation headers.
+
+## Best practices
+
+- Keep access tokens short-lived, and rotate refresh tokens on every use.
+- Validate issuer, audience, expiry, and algorithm on every request.
+- Pick the code grant with PKCE for browsers and phones, and client credentials for machine-to-machine traffic.
+- Store refresh tokens hashed, and treat a reused spent token as theft.
+- Keep signing keys in a secrets manager, with a rotation plan.
+- Delegate MFA to the identity provider instead of building your own.
 
 !!! tip "Interview tip"
     **Q: What is the difference between OAuth 2.0 and OpenID Connect?**
-    OAuth 2.0 lets a client get an access token to call an API on a user's behalf. It says nothing standard about who the user is. OpenID Connect adds an ID token that identifies the user and how they logged in. Use OIDC for login, and access tokens for API calls.
+    OAuth 2.0 is about permission: a token lets a client reach an API, and it does not define who the user is. OpenID Connect is about identity: the ID token tells the client who signed in and how. Log users in with OIDC, and call APIs with access tokens.
 
 ## Quick recap
 
-- JWTs are signed, not encrypted; always verify issuer, audience, expiry, and algorithm.
-- Keep access tokens short-lived; rotate refresh tokens.
-- Use authorisation code with PKCE for browser and mobile clients, and client credentials for service-to-service calls.
-- OIDC adds identity on top of OAuth 2.0 via the ID token.
-- Prefer TOTP-style MFA over SMS where you can.
+- A JWT is signed, not hidden. Check its issuer, audience, expiry, and algorithm every time.
+- Short access tokens and rotated refresh tokens limit the damage from a leak.
+- Browser and mobile apps use the code grant with PKCE. Service calls use client credentials.
+- The ID token is how OIDC adds identity to OAuth 2.0.
+- Favour app-based TOTP codes over SMS when you can.
 
-**See also:** [Spring Security Authorisation](spring-security-authorisation.md) | [Inter-Service Communication](../14-microservices/inter-service-communication.md) | [Secrets Management](secrets-management.md)
+## Official documentation
+
+- [JWT Introduction](https://jwt.io/introduction)
+- [RFC 7519: JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519)
+- [Spring Security Reference](https://docs.spring.io/spring-security/reference/index.html)
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+
+**See also:** [Spring Security Authorisation](spring-security-authorisation.md) | [Inter-Service Communication](../14-microservices/inter-service-communication.md) | [Secrets Management](secrets-management.md) | [Password Security and OWASP](password-security-owasp.md)

@@ -1,129 +1,134 @@
 # Garbage Collection
 
-Garbage collection (GC) is the JVM's automatic reclamation of heap memory that the program can no longer reach. Interviewers ask about GC to test whether you know how objects become garbage, which collector to pick for a workload, and how to tell from logs whether the collector is the cause of a slowdown.
+!!! note "In simple words"
+    The garbage collector finds objects that the program can no longer reach and frees their memory. It does not free objects that are still referenced, so a leak can still happen if old references stay around.
 
----
+## Why it matters
 
-## Core concepts
+Garbage collection removes the need to free memory by hand, but it has costs. It uses CPU, it can pause the application, and it cannot help when your code keeps references it no longer needs. Interviewers ask about GC to check three things: whether you know how an object becomes garbage, whether you can pick a collector for a workload, and whether you can read GC logs to tell if the collector is the cause of a slowdown.
+
+## How it works
 
 ### Reachability: what counts as garbage
 
-An object is garbage when no live reference chain connects it to a **GC root**. GC roots include:
+An object is garbage when no chain of live references connects it to a **GC root**. The GC roots are:
 
 - local variables and parameters on each thread's stack
 - static fields of loaded classes
-- JNI global references and active monitors (locks held by threads)
+- JNI global references and active monitors (locks that a thread holds)
 
-The collector starts from the roots and marks everything it can reach. Unmarked objects are garbage.
+The collector starts at the roots and marks every object it can reach. Anything left unmarked is garbage.
 
 ```java
 public class Reachability {
     public static void main(String[] args) {
         StringBuilder sb = new StringBuilder("temporary");
         System.out.println(sb.length());
-        sb = null;      // the object is now unreachable; the GC may reclaim it later
+        sb = null;                   // the object is now unreachable and may be reclaimed later
         System.out.println("done");
     }
 }
 ```
 
-Setting a reference to `null` does not free memory immediately. It only makes the object eligible for collection.
+Setting a reference to `null` does not free memory on the spot. It only makes the object eligible for collection, and the collector decides when to run.
 
-### Generational hypothesis
+### The generational hypothesis
 
-Most objects die young. Many short-lived objects are created by request handling, iterators, and temporary strings. The generational design takes advantage of this:
+Most objects die young. Request handling, iterators, and temporary strings create many objects that live for a few milliseconds. The generational design uses this fact:
 
 - New objects go into the **young generation** (Eden and survivor spaces).
-- A **minor GC** collects the young generation. It is frequent and fast.
+- A **minor GC** collects the young generation. It runs often and is fast.
 - Objects that survive enough minor GCs are promoted to the **old generation**.
-- A **major GC** (or full GC) collects the old generation. It is slower and causes longer pauses in most collectors.
+- A **major GC** (also called a full GC) collects the old generation. It is slower and usually causes longer pauses.
 
 ### Stop-the-world pauses and concurrent work
 
-Many collector phases must pause application threads so that the object graph does not change while it is traversed. These are **stop-the-world (STW)** pauses. Modern collectors do most of their marking and copying concurrently with the application and only pause briefly. The main trade-off is between:
+Some collector phases must pause application threads. Otherwise the object graph could change while the collector walks it. These are **stop-the-world (STW)** pauses. Modern collectors do most of their marking and copying alongside the application, so they pause only briefly.
 
-- **Throughput:** the share of time the application runs versus time spent in GC.
+Three goals pull against each other:
+
+- **Throughput:** the share of time spent running the application rather than GC.
 - **Latency:** the length of each pause.
-- **Footprint:** the memory the collector needs on top of live data.
+- **Footprint:** the memory the collector needs on top of the live data.
 
-You cannot optimise all three at once. The collector you choose sets the balance.
+No collector is best at all three. Each one is a different balance, so the choice of collector is a choice about these trade-offs.
 
 ### The collectors in the JDK
 
 | Collector | Flag | Design | Strength | Trade-off |
 |---|---|---|---|---|
-| Serial | `-XX:+UseSerialGC` | Single-threaded, stop-the-world | Small footprint; good for tiny heaps and single-CPU containers | Long pauses on large heaps |
-| Parallel | `-XX:+UseParallelGC` | Multi-threaded stop-the-world | High throughput for batch jobs | Pauses scale with heap size |
-| G1 | `-XX:+UseG1GC` | Region-based, mostly concurrent, pause-time goal | Balanced throughput and latency; default since Java 9 | More CPU and memory overhead than Parallel |
-| ZGC | `-XX:+UseZGC` | Region-based, concurrent compaction, very low pauses | Pauses that stay low as heap grows | Uses more memory and CPU overhead |
-| Epsilon | `-XX:+UseEpsilonGC` (experimental; needs `-XX:+UnlockExperimentalVMOptions`) | No-op collector; allocates but never frees | Performance tests and measuring allocation cost | Runs out of memory when the heap is full |
+| Serial | `-XX:+UseSerialGC` | Single-threaded, stop-the-world | Small footprint, good for tiny heaps and single-CPU containers | Long pauses on large heaps |
+| Parallel | `-XX:+UseParallelGC` | Multi-threaded, stop-the-world | High throughput for batch jobs | Pause length grows with heap size |
+| G1 | `-XX:+UseG1GC` | Region-based, mostly concurrent, with a pause-time goal | Balanced throughput and latency, default since Java 9 | More CPU and memory overhead than Parallel |
+| ZGC | `-XX:+UseZGC` | Region-based, concurrent compaction, very short pauses | Pauses stay low as the heap grows | More memory and CPU overhead |
+| Epsilon | `-XX:+UseEpsilonGC` (experimental, needs `-XX:+UnlockExperimentalVMOptions`) | No-op collector that allocates but never frees | Performance tests and measuring allocation cost | Runs out of memory when the heap is full |
 
-Shenandoah is another low-pause collector available in some OpenJDK builds. It is not part of every JDK distribution, so check your vendor before relying on it.
+Shenandoah is another low-pause collector. It is present in some OpenJDK builds but not in every JDK distribution, so check your vendor before you rely on it.
 
 ### Default collector by Java version
 
-When you do not pass a collector flag, the JVM picks one based on the machine it runs on. "Server-class" means at least two CPUs and about 2 GB of memory, which covers most servers and containers you will deploy to.
+If you do not pass a collector flag, the JVM picks one based on the machine. A "server-class" machine has at least two CPUs and about 2 GB of memory. That covers most servers and containers.
 
-| Java version | Default collector (server-class machine) | Notes |
+| Java version | Default collector on a server-class machine | Notes |
 |---|---|---|
-| Java 8 | Parallel GC | On small or single-CPU machines the JVM picks Serial GC instead |
+| Java 8 | Parallel GC | Small or single-CPU machines get Serial GC instead |
 | Java 9 | G1 | G1 became the default with JEP 248 |
-| Java 11 | G1 | Unchanged from Java 9 |
-| Java 17 | G1 | Unchanged |
-| Java 21 | G1 | Unchanged; virtual threads change how many threads an app runs, not which collector is the default |
+| Java 11 | G1 | No change from Java 9 |
+| Java 17 | G1 | No change |
+| Java 21 | G1 | No change. Virtual threads change how many threads run, not which collector is the default |
 
-If you move a service from Java 8 to a newer JDK, measure pauses again. The same heap settings can behave differently under G1, which is tuned for pause time rather than raw throughput.
+If you move a service from Java 8 to a newer JDK, measure the pauses again. G1 is tuned for pause time rather than raw throughput, so the same heap settings can behave differently.
 
 ### CMS was removed
 
-The Concurrent Mark Sweep (CMS) collector was deprecated in Java 9 and removed in Java 14. Its replacement is G1. Launch scripts that still pass `-XX:+UseConcMarkSweepGC` fail on a current JDK, so they need to be updated.
+The Concurrent Mark Sweep (CMS) collector was deprecated in Java 9 and removed in Java 14. G1 replaces it. Launch scripts that still pass `-XX:+UseConcMarkSweepGC` will not start on a current JDK, so update them.
 
 ### G1 in more detail
 
-G1 divides the heap into equal-sized regions. Each region can be an Eden, survivor, old, or humongous region (for very large objects). G1 chooses which regions to collect based on how much garbage they hold, which is where the name "garbage first" comes from.
+G1 splits the heap into regions of equal size. Each region can be an Eden, survivor, old, or humongous region. Humongous regions hold very large objects. G1 picks the regions with the most garbage first. That selection gives the collector its name: garbage first.
 
-You give G1 a pause-time goal, and it tries to meet it:
+You give G1 a pause-time goal, and it tries to meet that goal:
 
 ```bash
 java -XX:+UseG1GC -XX:MaxGCPauseMillis=200 MyApp
 ```
 
-`MaxGCPauseMillis` is a goal, not a guarantee. If the goal is too aggressive for the live data, G1 may run longer pauses or fall back to a full collection.
+`MaxGCPauseMillis` is a goal, not a guarantee. If the goal is too strict for the live data, G1 may take longer pauses or fall back to a full collection.
 
 ### G1 phases
 
-G1 does not run one big cycle. It alternates short young pauses with a background marking cycle, then uses mixed pauses to reclaim old regions a few at a time.
+G1 does not run one large cycle. It alternates short young pauses with a background marking cycle. Then it runs mixed pauses that reclaim old regions a few at a time.
 
-| Phase | Stops application threads? | What happens |
+| Phase | Stops application threads | What happens |
 |---|---|---|
-| Young GC | Yes, briefly | Live objects in Eden and survivor regions are copied to survivor or old regions. The collector also starts concurrent marking when old-generation occupancy passes `InitiatingHeapOccupancyPercent` (default 45). |
-| Concurrent mark | No, runs alongside the application | Traces the live object graph from the GC roots. The first step, initial mark, is done inside a young pause. |
-| Remark | Yes, briefly | Finishes marking using the snapshot taken at the start of the cycle, and identifies regions that are now empty or nearly empty. |
-| Cleanup | Mostly a short pause | Records live-data totals for each old region and frees regions that hold no live objects. It does not compact the heap; copying happens in evacuation pauses. |
-| Mixed GC | Yes | Evacuates all young regions together with the old regions that hold the most garbage, so old space is reclaimed in small steps. |
+| Young GC | Yes, briefly | Live objects in Eden and survivor regions are copied to survivor or old regions. Concurrent marking starts when old-generation occupancy passes `InitiatingHeapOccupancyPercent`, which defaults to 45. |
+| Concurrent mark | No, runs alongside the application | Traces the live object graph from the GC roots. The initial mark step is done during a young pause. |
+| Remark | Yes, briefly | Finishes marking and identifies regions that are now empty or nearly empty. |
+| Cleanup | Short pause | Records live-data totals for each old region and frees regions with no live objects. It does not compact the heap. |
+| Mixed GC | Yes | Copies the young regions together with the old regions that hold the most garbage. |
 
-In normal operation the sequence is: young pauses, then a marking cycle (concurrent mark, remark, cleanup), then several mixed pauses, then young pauses again. If young collections cannot keep up while marking is running, G1 can fall back to a full stop-the-world collection.
+In normal operation the sequence is: young pauses, then a marking cycle (concurrent mark, remark, cleanup), then several mixed pauses, then young pauses again. If young collections cannot keep up while marking runs, G1 can fall back to a full stop-the-world collection.
 
 ### ZGC in more detail
 
-ZGC aims for pauses that stay below a millisecond or so, independent of heap size. It does most work concurrently, including relocating live objects. It uses colored pointers and load barriers to keep the application consistent while objects move.
+ZGC aims for pauses of about a millisecond, and those pauses stay about the same as the heap grows. It does most of its work concurrently, including moving live objects. It uses colored pointers and load barriers so the application sees a consistent view while objects move.
 
 ```bash
 java -XX:+UseZGC -Xmx16g MyApp
 ```
 
-ZGC is a good fit for latency-sensitive services with large heaps. For small heaps with a throughput goal, Parallel or G1 is often a better choice. Measure before switching.
+ZGC suits latency-sensitive services with large heaps. For a small heap with a throughput goal, Parallel or G1 is often the better choice. Measure before you switch.
 
 ### Choosing a collector
 
-A rough guide, to be confirmed by measurement:
+As a rough guide, confirm each choice with measurement:
 
 - Small container, one CPU, small heap: Serial.
-- Batch job where total runtime matters more than pause length: Parallel.
-- General-purpose service, default choice: G1.
-- Latency-sensitive service where pauses must stay short even with a large heap: ZGC.
+- Batch job where total run time matters more than pause length: Parallel.
+- General-purpose service, the default choice: G1.
+- Latency-sensitive service that must keep pauses short on a large heap: ZGC.
 
-The JVM picks a default collector based on the machine. Check which one is active with:
+Check which collector is active with:
 
 ```bash
 java -XX:+PrintFlagsFinal -version | grep -E "Use(G1|Serial|Parallel|Z)GC"
@@ -131,7 +136,7 @@ java -XX:+PrintFlagsFinal -version | grep -E "Use(G1|Serial|Parallel|Z)GC"
 
 ### Memory leaks in a garbage-collected language
 
-GC prevents dangling pointers, but it does not prevent leaks. A leak happens when objects remain reachable even though the program no longer needs them. The collector cannot free them because a live reference still points to them.
+Garbage collection prevents dangling pointers, but it does not prevent leaks. A leak happens when the program no longer needs an object but a live reference still points to it. The collector cannot free something that is reachable.
 
 ```java
 import java.util.ArrayList;
@@ -141,23 +146,28 @@ public class LeakExample {
     private static final List<byte[]> CACHE = new ArrayList<>();
 
     static void handleRequest() {
-        CACHE.add(new byte[1024]);  // never removed: the static list keeps every array reachable
+        CACHE.add(new byte[1024]);      // never removed, so the static list keeps every array reachable
     }
 
     public static void main(String[] args) {
         for (int i = 0; i < 10; i++) {
             handleRequest();
         }
-        System.out.println("cached entries: " + CACHE.size());
+        System.out.println("cached entries: " + CACHE.size());   // prints 10
     }
 }
 ```
 
-Common sources of leaks are static collections used as caches with no eviction, listeners that are never removed, `ThreadLocal` values in thread pools, and class-loader leaks after redeployment.
+Common sources of leaks are:
+
+- static collections used as caches with no eviction policy
+- listeners that are registered and never removed
+- `ThreadLocal` values left behind in pooled threads
+- class-loader leaks after a redeployment (see [Class Loading](class-loading.md))
 
 ### Weak references
 
-Weak references let the GC reclaim an object when only weak references point to it. They are useful for caches where you are happy to lose entries under memory pressure.
+A weak reference does not keep its target alive. When only weak references point to an object, the GC may reclaim it. Weak references suit caches where losing an entry under memory pressure is acceptable.
 
 ```java
 import java.lang.ref.WeakReference;
@@ -167,105 +177,144 @@ public class WeakDemo {
         Object strong = new Object();
         WeakReference<Object> weak = new WeakReference<>(strong);
 
-        System.out.println("before: " + (weak.get() != null));   // true
+        System.out.println("before: " + (weak.get() != null));  // true
         strong = null;
-        System.gc();   // a hint only; the JVM may ignore it
-        System.out.println("after: " + (weak.get() != null));    // may print true or false
+        System.gc();                                             // only a hint; the JVM may ignore it
+        System.out.println("after: " + (weak.get() != null));   // may print true or false
     }
 }
 ```
 
-`WeakHashMap` is built on the same idea. For cleanup actions after an object is collected, use `java.lang.ref.Cleaner` (Java 9+). `Object.finalize()` is deprecated and should not be used in new code.
+`WeakHashMap` uses the same idea for its keys. To run cleanup code after an object is collected, use `java.lang.ref.Cleaner`, which is available from Java 9. `Object.finalize()` is deprecated and should not appear in new code.
 
 ### Tuning flags you will see
 
 ```bash
 -Xms2g -Xmx2g                       # fixed heap size, avoids resize pauses
 -XX:MaxGCPauseMillis=200            # pause-time goal for G1
--XX:+HeapDumpOnOutOfMemoryError     # write a heap dump when the heap is exhausted
+-XX:+HeapDumpOnOutOfMemoryError     # write a heap dump when the heap runs out
 -XX:HeapDumpPath=/var/dumps/        # where to write the dump
 ```
 
-Tuning should follow measurement. Start with the default collector and the heap size that fits your machine. Change one flag at a time and compare GC logs and latency numbers.
+Tune in response to measurements. Start with the default collector and a heap size that fits the machine. Change one flag at a time, then compare the GC logs and latency numbers.
 
----
+### Step by step: one allocation to one reclaimed object
 
-## How it works / Step by step
-
-1. Allocation: `new` takes space from the young generation (or a TLAB, a per-thread allocation buffer).
-2. When Eden fills, a minor GC runs. Live objects are copied to a survivor space or promoted to the old generation.
-3. When the old generation fills past a threshold, a major GC runs. G1 and ZGC do this concurrently in most cases.
+1. Allocation: `new` takes space from the young generation, or from a TLAB (a per-thread allocation buffer).
+2. When Eden fills up, a minor GC runs. Live objects are copied to a survivor space or promoted to the old generation.
+3. When the old generation passes a threshold, a major GC runs. G1 and ZGC do most of this work concurrently.
 4. If concurrent work cannot keep up, the collector falls back to a longer stop-the-world collection.
-5. If live data does not fit even after full collection, the JVM throws `OutOfMemoryError: Java heap space`.
+5. If the live data still does not fit after a full collection, the JVM throws `OutOfMemoryError: Java heap space`.
+
+```mermaid
+flowchart LR
+    A[new object] --> B[Eden in young generation]
+    B --> C{Minor GC}
+    C -- still live --> D[Survivor space]
+    D --> E{Survived enough GCs}
+    E -- yes --> F[Old generation]
+    E -- no --> D
+    C -- unreachable --> G[Reclaimed]
+    F --> H{Major GC}
+    H -- unreachable --> G
+```
 
 ### Reading GC logs
 
-Enable unified GC logging with:
+Turn on unified GC logging with:
 
 ```bash
 java -Xlog:gc*:file=gc.log:time,uptime,level,tags -Xmx2g MyApp
 ```
 
-A typical G1 young-collection line looks like this (the exact text changes between JDK versions, so treat it as an illustration):
+A typical G1 young-collection line looks like this. The exact text changes between JDK versions, so treat it as an illustration:
 
 ```text
 [2.345s][info][gc] GC(12) Pause Young (Normal) (G1 Evacuation Pause) 412M->96M(2048M) 9.871ms
 ```
 
-Read it left to right:
+Read it from left to right:
 
-- `GC(12)`: the 13th collection since startup.
-- `Pause Young`: a young-generation pause.
-- `412M->96M(2048M)`: heap used before and after, and the current committed heap size.
-- `9.871ms`: the pause length. This is the number your latency SLO cares about.
+- `GC(12)` is the 13th collection since startup.
+- `Pause Young` means a young-generation pause.
+- `412M->96M(2048M)` is the heap used before and after the pause, and the heap size the JVM has committed.
+- `9.871ms` is the pause length. Your latency objectives depend on this number.
 
 Things to look for:
 
-- Frequent pauses with little memory freed suggests a leak or too small a young generation.
-- Old-generation usage that climbs after each full collection and never drops is a leak.
-- Long pauses that match request timeouts point to a collector or heap-size problem.
-- Many back-to-back "Allocation Failure" messages mean allocation outpaces collection.
+- Frequent pauses that free little memory suggest a leak, or a young generation that is too small.
+- Old-generation use that rises after each full collection and never drops is a leak.
+- Long pauses that match request timeouts point to the collector or the heap size.
+- Many back-to-back "Allocation Failure" messages mean allocation is faster than collection.
 
-Tools that read these logs include GCViewer and GCEasy (third-party), and the JDK's `jstat -gc <pid>` for live counters.
+GCViewer and GCEasy are third-party tools that read these logs. `jstat -gc <pid>` shows the same counters for a running process.
 
 ### Common GC symptoms and fixes
 
-Most GC problems show up first as a latency or memory symptom. Match the symptom to a likely cause, then confirm it with GC logs or a heap dump before changing flags.
+Most GC problems first appear as a latency or memory symptom. Match the symptom to a likely cause, then confirm it with GC logs or a heap dump before you change any flag.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Full GC thrashing: frequent full collections, high CPU, little memory freed | Live data close to `-Xmx`, a leak, or an allocation rate the old generation cannot absorb | Find what keeps data alive (heap dump). Reduce the live set or allocation rate. Raise `-Xmx` only if the live data really fits in the larger heap. |
-| Long pauses: requests time out during collections | Large live set being copied, very large (humongous) objects, a throughput-tuned collector such as Parallel, or an unrealistic pause goal | Shrink the live set. Use G1 or ZGC for latency-sensitive services. Set `MaxGCPauseMillis` to a value the workload can meet, and check logs for full collections. |
-| High GC overhead: a large share of CPU goes to collection | High allocation rate with a small young generation, or a heap that stays nearly full | Reduce short-lived allocations (reuse buffers, avoid temporary collections). Give the young generation or the heap more room. |
-| Memory leak: old-generation usage climbs after each full collection | Static collections, caches with no size limit, listeners never removed, or `ThreadLocal` values left in pooled threads | Take a heap dump (`jmap -dump:live,format=b,file=heap.hprof <pid>`, or `-XX:+HeapDumpOnOutOfMemoryError`). Open it in a tool such as Eclipse MAT and follow the retaining paths. Bound caches, remove listeners, and call `ThreadLocal.remove()` when work ends. |
+| Full GC thrashing: frequent full collections, high CPU, little memory freed | Live data close to `-Xmx`, a leak, or an allocation rate the old generation cannot absorb | Find what keeps the data alive with a heap dump. Reduce the live set or the allocation rate. Raise `-Xmx` only if the live data truly fits. |
+| Long pauses: requests time out during collections | A large live set being copied, very large (humongous) objects, a throughput collector such as Parallel, or a pause goal the workload cannot meet | Shrink the live set. Use G1 or ZGC for latency-sensitive services. Set `MaxGCPauseMillis` to a value the workload can meet, and look for full collections in the log. |
+| High GC overhead: a large share of CPU goes to collection | A high allocation rate with a small young generation, or a heap that stays nearly full | Reduce short-lived allocations, for example by reusing buffers. Give the young generation or the heap more room. |
+| Memory leak: old-generation use climbs after each full collection | Static collections, caches without a size limit, listeners that are never removed, or `ThreadLocal` values left in pooled threads | Take a heap dump with `jmap -dump:live,format=b,file=heap.hprof <pid>`, or use `-XX:+HeapDumpOnOutOfMemoryError`. Open it in Eclipse MAT and follow the retaining paths. Bound the caches, remove listeners, and call `ThreadLocal.remove()` when the work ends. |
 
-No fixed CPU percentage defines "high GC overhead". The JVM throws `OutOfMemoryError: GC overhead limit exceeded` when almost all of its time goes to GC and very little memory is recovered. Treat that error as a sign to fix allocations or the heap, not as something to switch off.
+No fixed CPU percentage defines "high GC overhead". When the JVM spends almost all of its time collecting and recovers very little memory, it throws `OutOfMemoryError: GC overhead limit exceeded`. Treat that error as a sign that allocations or the heap need fixing. Do not turn the check off.
 
----
+## Where it is used
 
-## Common pitfalls
+- **Web and API services** use G1 by default and watch pause times against request latency targets.
+- **Batch and data jobs** often choose Parallel GC, because total run time matters more than pause length.
+- **Trading, gaming, and real-time systems** choose ZGC or a tuned G1 when pauses must stay short on large heaps.
+- **Performance teams** read GC logs to confirm whether a slowdown comes from collection or from application code.
 
-- Calling `System.gc()` in application code. It is only a hint, and it usually causes a full collection, which is costly. Use it only in tests or with a specific reason.
-- Setting `-Xmx` very high without a plan for pauses. A larger heap makes some collectors pause longer.
-- Changing many GC flags at once. You cannot tell which change helped.
-- Assuming that GC removes all memory problems. Leaks come from live references, not from the collector.
-- Using CMS flags on Java 14 or later. The JVM will not start.
-- Relying on `finalize()` to close files or sockets. Use try-with-resources instead.
-- Tuning the heap without looking at allocation rate. Reducing allocations often helps more than tuning.
+## Benefits
+
+- **No manual free.** The collector reclaims memory automatically, which removes a large class of memory bugs.
+- **Generational speed.** Collecting young objects often and old objects rarely keeps most collections cheap.
+- **Choice of trade-offs.** Serial, Parallel, G1, and ZGC cover small, batch, general, and low-latency workloads.
+- **Concurrent phases.** G1 and ZGC do most of their work while the application keeps running, so pauses stay short.
+
+## Cons and limits
+
+- **Leaks still happen.** Reachable but unused objects are never collected.
+- **Pauses are a trade-off.** Stop-the-world phases exist in every collector, and their length grows with the live data for some designs.
+- **Tuning is workload-specific.** A flag that helps one service can hurt another.
+- **Finalization is unreliable.** `finalize()` runs at an unknown time, or not at all, so it cannot manage resources.
+- **Measurement adds overhead.** Detailed GC logging and heap dumps cost time and disk space.
+
+## Best practices
+
+- Start with the default collector. Change it only after you measure pauses and throughput under realistic load.
+- Use G1 as the general-purpose default on current JDKs. Consider ZGC when pauses must stay short on a large heap, and Parallel when throughput is the only goal.
+- Do not call `System.gc()` in application code. It is only a hint and usually causes a full collection. Use it in tests, or when you have a specific reason.
+- Do not set `-Xmx` very high without a plan for pauses. A larger heap can make some collectors pause longer.
+- Change one GC flag at a time, so you can see which change helped.
+- Remember that GC cannot fix a leak. Look for the live references with a heap dump.
+- Reduce allocation rate where you can. Fewer short-lived objects often helps more than tuning.
+- Release resources with try-with-resources, not with `finalize()` or the collector.
+- Do not use CMS flags on Java 14 or later. The JVM will not start with them.
 
 !!! tip "Interview tip"
     **Q: How do you decide which garbage collector to use?**
-    Start with the default (G1 on current JDKs), measure pause times and throughput under realistic load, and only then change the collector. Use Parallel when throughput matters more than pauses, and ZGC when pauses must stay low on a large heap. Always confirm the choice with GC logs and latency metrics.
+    Start with the default, which is G1 on current JDKs. Measure pauses and throughput under realistic load, and change the collector only if the measurements call for it. Use Parallel when throughput matters more than pauses, and ZGC when pauses must stay short on a large heap. Always confirm the choice with GC logs and latency metrics.
 
     **Follow-up: Can a Java program have a memory leak?**
-    Yes. The GC frees objects that are unreachable. If a static cache, listener, or ThreadLocal keeps a reference to objects that are no longer needed, they stay reachable and the heap fills up. Heap dumps and object histograms (`jmap -histo`) help find the retaining path.
+    Yes. The collector frees only unreachable objects. If a static cache, a listener, or a `ThreadLocal` keeps references to objects that are no longer needed, they stay reachable and the heap fills up. A heap dump or an object histogram from `jmap -histo` shows what is holding them.
 
 ## Quick recap
 
-- An object is garbage when no GC root can reach it; setting a reference to `null` only makes it eligible.
+- An object is garbage when no GC root can reach it. Setting a reference to `null` only makes the object eligible.
 - The generational design collects young objects often and old objects rarely.
-- Serial, Parallel, G1, and ZGC cover small, batch, general, and low-latency workloads. G1 is the default since Java 9.
-- CMS was removed in Java 14; use G1 or ZGC instead.
+- Serial, Parallel, G1, and ZGC cover small, batch, general, and low-latency workloads. G1 has been the default since Java 9.
+- CMS was removed in Java 14. Use G1 or ZGC instead.
 - Read `-Xlog:gc*` output to find pause lengths, heap growth, and leaks.
 
-**See also:** [JVM Architecture and Memory](jvm-architecture-memory.md), [JIT Compilation and Performance Tools](jit-and-performance-tools.md), [JVM Internals index](index.md)
+## Official documentation
+
+- [Java SE 21 Garbage Collection Tuning Guide](https://docs.oracle.com/en/java/javase/21/gctuning/)
+- [Java SE 21 API documentation](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
+- [JEP index (OpenJDK)](https://openjdk.org/jeps/)
+
+**See also:** [JVM Architecture and Memory](jvm-architecture-memory.md), [JIT Compilation and Performance Tools](jit-and-performance-tools.md), [Class Loading](class-loading.md), [JVM Internals index](index.md)

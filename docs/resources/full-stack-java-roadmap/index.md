@@ -1,8 +1,28 @@
 # Complete Full Stack Java Developer Roadmap
 
+!!! note "In simple words"
+    This roadmap is a long, step-by-step plan that takes you from core Java to building and shipping backend apps. Work through the phases in order, and practise each topic by writing a small example.
+
 A phase-by-phase plan for becoming a backend-focused Java engineer: core language, data access, Spring, production engineering, system design, and interview preparation.
 
 **Duration:** 6–8 months | **Intensity:** 3–4 hours/day, 5–6 days/week | **Topics:** 500+ concepts across 25 sections
+
+---
+
+## Roadmap at a glance
+
+```mermaid
+flowchart TD
+    P1[Foundations and Core Java] --> P2[Data Structures and Algorithms track]
+    P2 --> P3[Build Tools and Database Layer]
+    P3 --> P4[Spring Framework and Boot]
+    P4 --> P5[Security Testing and Caching]
+    P5 --> P6[Messaging and Microservices]
+    P6 --> P7[DevOps and Cloud]
+    P7 --> P8[System Design and Observability]
+    P8 --> P9[Advanced Topics and Specialisation]
+    P9 --> P10[Interview Preparation and Portfolio]
+```
 
 ---
 

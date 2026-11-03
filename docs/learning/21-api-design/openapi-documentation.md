@@ -1,27 +1,53 @@
 # Documenting APIs with OpenAPI and springdoc
 
-OpenAPI is a standard, machine-readable format for describing HTTP APIs. It was formerly called Swagger. A spec lists the paths, methods, parameters, request and response bodies, status codes, and security schemes. Interviewers ask about it to see whether you treat the API contract as a product, and whether your documentation can stay in step with the code.
+!!! note "In simple words"
+    An OpenAPI description is a machine-readable map of an API, covering its paths, inputs, outputs, errors, and security rules. Tools read that map to build documentation, generate client code, and run tests, so the contract lives in one place.
 
-## Core concepts
+OpenAPI is a standard, machine-readable way of describing HTTP APIs. It used to be known as Swagger. A description lists paths, methods, parameters, bodies, status codes, and security schemes. Interviewers raise it to learn whether you regard the API contract as a product, and whether your docs can stay synchronised with the code.
+
+## Why it matters
+
+Developers decide whether to adopt an API based on its documentation. Missing or inaccurate docs lead them to guess, and guesses break in production. A precise description also lets build tools flag breaking changes, generate clients in several languages, and let testers send real requests from a browser page. Docs produced from the code stay accurate without extra effort.
+
+## How it works
+
+Springdoc inspects controllers and models at start-up. It assembles an OpenAPI document and publishes it at fixed URLs. The interactive UI and any generators then consume that document, and nothing else has to be done for it to appear.
+
+```mermaid
+flowchart LR
+    Code[Controllers and models] --> Scan[springdoc scans at start-up]
+    Annot[Annotations add descriptions] --> Scan
+    Scan --> Doc[OpenAPI document]
+    Doc --> UI[Swagger UI]
+    Doc --> Gen[Client generator]
+    Doc --> Tests[Contract checks in CI]
+```
+
+The sequence at runtime:
+
+1. At start-up, springdoc reads the controllers, the request and response types, and their annotations.
+2. It builds the OpenAPI model in memory.
+3. It exposes that model at the configured paths.
+4. The UI and the generators read the document, with no further steps required.
 
 ### What the spec contains
 
-An OpenAPI document is a JSON or YAML file with a few top-level sections:
+An OpenAPI document, written in JSON or YAML, has four main sections:
 
 - `info` gives the title, version, and description.
-- `servers` lists base URLs, such as production and local development.
-- `paths` maps each URL and method to an operation, its parameters, and its responses.
-- `components` holds reusable schemas, parameters, responses, and security schemes.
+- `servers` lists base URLs, such as production and a local environment.
+- `paths` maps every URL and method to an operation, including its parameters and responses.
+- `components` stores reusable schemas, parameters, responses, and security schemes.
 
-Tools read the spec to render interactive documentation, generate client libraries, and test requests. The spec can be written first (design-first) or generated from the code (code-first). Spring projects usually take the code-first route with springdoc.
+Tools use the description to draw interactive docs, generate client libraries, and exercise endpoints. The description can be written first (design-first) or generated from the code (code-first). Spring projects usually go code-first with springdoc. The [OpenAPI Specification](https://spec.openapis.org/oas/latest.html) defines each field precisely.
 
 ### Setup with springdoc-openapi
 
-Add `springdoc-openapi-starter-webmvc-ui`. Use the 2.x line for Spring Boot 3. With the dependency on the classpath, the application serves:
+Add `springdoc-openapi-starter-webmvc-ui`, using the 2.x line for Spring Boot 3. With that dependency present, the application serves:
 
-- `/v3/api-docs`: the spec as JSON
-- `/v3/api-docs.yaml`: the spec as YAML
-- `/swagger-ui/index.html`: an interactive UI where you can send requests
+- `/v3/api-docs`: the description in JSON.
+- `/v3/api-docs.yaml`: the description in YAML.
+- `/swagger-ui/index.html`: an interactive page for trying requests.
 
 ```xml
 <dependency>
@@ -31,14 +57,17 @@ Add `springdoc-openapi-starter-webmvc-ui`. Use the 2.x line for Spring Boot 3. W
 </dependency>
 ```
 
+The [springdoc project site](https://springdoc.org/) lists version compatibility and the complete set of configuration options.
+
 ### Annotating operations
 
-springdoc reads the controller mappings automatically. Annotations add the descriptions that the code cannot express.
+springdoc picks up controller mappings on its own. Annotations contribute the prose that code cannot express. This is a library example and is not compiled here:
 
 ```java
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -55,8 +84,10 @@ public class UserDocController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get a user", description = "Returns one user by ID")
-    @ApiResponse(responseCode = "200", description = "User found")
-    @ApiResponse(responseCode = "404", description = "No user with this ID")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "User found"),
+            @ApiResponse(responseCode = "404", description = "No user with this ID")
+    })
     public ResponseEntity<UserView> get(
             @Parameter(description = "User identifier", example = "123") @PathVariable long id) {
         return ResponseEntity.ok(new UserView(id, "Sample user"));
@@ -64,24 +95,24 @@ public class UserDocController {
 }
 ```
 
-The main annotations, and what they add to the spec:
+What each annotation contributes:
 
-| Annotation | Purpose |
+| Annotation | Contribution |
 |---|---|
-| `@Tag` | Groups operations under one heading in the UI |
-| `@Operation` | Summary, description, and deprecation flag for one operation |
+| `@Tag` | Groups related operations under one heading in the UI |
+| `@Operation` | Summary, description, and the deprecation flag for one operation |
 | `@Parameter` | Description and example for a path, query, or header parameter |
-| `@ApiResponse` | A documented status code and what it means; can include an example body |
+| `@ApiResponse` | A documented status code with its meaning, and optionally an example body |
 | `@Schema` | Description, example, and constraints for a model or field |
-| `@SecurityRequirement` | Which security scheme protects an operation |
+| `@SecurityRequirement` | The security scheme that protects an operation |
 
-Use `@Operation(deprecated = true)` to mark an operation as deprecated in the spec. The Java `@Deprecated` annotation is for the compiler and callers in code, not for the published contract.
+Set `@Operation(deprecated = true)` to flag an operation as deprecated in the published contract. The Java `@Deprecated` annotation speaks to the compiler and to code that calls the method. It does not reach API consumers.
 
-Do not put annotations on a `@RequestBody` parameter to describe its example. The example belongs on the schema, which the next section covers.
+Do not annotate a `@RequestBody` parameter to describe its example. The example belongs on the schema, covered in the next section.
 
 ### Documenting models
 
-`@Schema` on a model's fields adds descriptions, examples, and constraints. It works on record components as well as on classes.
+`@Schema` on a model's fields supplies descriptions, examples, and constraints. It works on record components and on ordinary classes alike. This record is a library example and is not compiled here:
 
 ```java
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -96,11 +127,11 @@ public record CreateUserRequest(
 }
 ```
 
-Bean Validation annotations such as `@NotBlank` and `@Email` are also reflected in the schema, so the documented constraints match what the code enforces.
+Bean Validation annotations, such as `@NotBlank` and `@Email`, feed into the schema too. That keeps the documented constraints aligned with what the code actually enforces.
 
 ### Example responses with @ExampleObject
 
-A schema shows the shape of a body. An example shows a realistic instance, and reviewers and client developers use examples to understand the contract quickly. `@ExampleObject` attaches one or more examples to a response's `@Content`, and each example can carry a name and a summary so the UI lists them separately.
+A schema describes shape, while an example shows a realistic instance. Reviewers and client developers rely on examples to grasp a contract quickly. `@ExampleObject` attaches one or more examples to a response's `@Content`. Each can carry a name and a summary, which the UI uses to list the variants separately. This is a library example and is not compiled here:
 
 ```java
 import io.swagger.v3.oas.annotations.Operation;
@@ -139,13 +170,13 @@ class InvoiceApi {
 
 Three points about examples:
 
-- They are documentation, not tests. Springdoc does not check that the example matches the schema, so keep examples in step with the code by generating them from a real response where you can.
-- Use fake data only. An example is public once the UI is published, so it must not contain real customer details, tokens, or internal identifiers.
-- Give each example a name when a response has more than one meaningful case, such as a paid and an open invoice. Clients then see the variants side by side instead of guessing.
+- They are documentation, not tests. Springdoc does not verify that an example conforms to its schema. Keep examples current, and where possible generate them from a real response.
+- Use invented data only. Once the UI is published, every example is public, so it must not hold genuine customer details, tokens, or internal IDs.
+- When a response has several meaningful cases, such as a paid and an open invoice, name each example. Clients then compare the variants side by side rather than guessing.
 
 ### Configuring paths and the UI
 
-Most defaults are fine. The properties below control where the documents are served and which paths are included:
+Most defaults are sensible. These properties decide where the documents are published and which paths are covered:
 
 ```yaml
 springdoc:
@@ -158,11 +189,11 @@ springdoc:
   paths-to-exclude: /internal/**
 ```
 
-Keep internal and administrative paths out of the public spec. Hiding them in the UI is not enough, so exclude them in configuration and protect the UI itself in production.
+Administrative and internal paths should stay out of the public description. Hiding them in the UI does not count, so exclude them through configuration and protect the UI itself in production.
 
 ### Global information and bearer security
 
-A bean that builds the `OpenAPI` object sets the title, servers, and security scheme for the whole API. Add a `SecurityRequirement` to the operations that need a token.
+A bean that constructs the `OpenAPI` object supplies the title, servers, and security scheme for the whole API. Operations that need a token then reference that scheme. This is a library example and is not compiled here:
 
 ```java
 import io.swagger.v3.oas.models.Components;
@@ -191,15 +222,15 @@ public class OpenApiConfig {
 }
 ```
 
-`addSecurityItem` applies the requirement to every operation. For a mixed API, leave it off and add `@SecurityRequirement(name = "bearerAuth")` to the protected operations instead.
+`addSecurityItem` attaches the requirement to every operation. In an API that mixes public and protected endpoints, skip that call and place `@SecurityRequirement(name = "bearerAuth")` on the protected operations.
 
 ### Documenting error responses
 
-Document the error bodies as carefully as the success bodies. If errors use Problem Details (see [Pagination, Errors, and Idempotency](pagination-errors-idempotency.md)), describe that schema once and reference it from each `@ApiResponse` that can fail. Clients generate their error handling from these entries, so a missing `401` or `409` is a bug in the contract.
+Error bodies deserve the same care as success bodies. When errors use Problem Details (see [Pagination, Errors, and Idempotency](pagination-errors-idempotency.md)), describe that schema once and point each failing `@ApiResponse` at it. Clients generate their error handling from these entries, so a missing `401` or `409` is a defect in the contract.
 
 ### Generating clients and servers
 
-The OpenAPI Generator tool reads the spec and writes client code. Point it at the running service's spec, or at a file in the repository, and pick a generator:
+The OpenAPI Generator reads the description and writes client code. Point it at the running service, or at a file in the repository, and choose a target generator:
 
 ```bash
 openapi-generator-cli generate \
@@ -208,44 +239,63 @@ openapi-generator-cli generate \
   -o generated/orders-client
 ```
 
-Generated clients track the contract, so a breaking change shows up in the client build rather than in production. Generate into a separate directory, and commit the spec, not hand edits to the output.
+Generated clients follow the contract, so a breaking change surfaces when the client is built rather than when customers hit it. Generate into a dedicated folder, and commit the specification itself rather than hand-edits to the generated output.
 
-## Code-first versus design-first
+## Where it is used
 
-| Aspect | Code-first (springdoc) | Design-first (spec written before code) |
-|---|---|---|
-| Source of truth | The controllers and models | The OpenAPI file |
-| Drift risk | Low, because the spec comes from code | Higher, unless the code is checked against the spec |
-| Review of the design | Happens after the code exists | Happens before any code is written |
-| Good fit | Internal services, quick iteration | Public APIs with many consumers |
+- Public APIs whose consumers need a browsable reference and generated SDKs.
+- Internal services where teams call one another and need a current contract.
+- Contract checks in CI, which fail the build when code drifts from the description.
+- Developer portals that publish the specification to partners.
 
-Many teams combine them: design the public surface in a spec, review it, and check the implementation against it in tests.
+## Benefits
 
-## How it works
+- **Accurate documentation** produced directly from the code, with little extra work.
+- **Interactive testing** through the built-in UI.
+- **Generated clients** in many languages that track the contract.
+- **Early detection** of breaking changes when the description is compared during the build.
 
-1. At startup, springdoc scans the controllers, request and response types, and annotations.
-2. It builds the OpenAPI model and serves it at the configured paths.
-3. The UI and generators read that document; nothing else needs to change.
+## Cons and limits
+
+- **Annotations clutter** controllers, and they need upkeep as the code changes.
+- **Examples can drift** because springdoc does not check them against the schema.
+- **Code-first descriptions can hide design flaws**, since the design is only reviewed once the code exists.
+- **An exposed UI in production** reveals the whole API surface to attackers.
+
+## Best practices
+
+- Keep the description in the build, and fail the build on unexpected breaking changes.
+- Annotate operations and models with descriptions, examples, and every status code they can return.
+- Document the error responses, including `401`, `403`, and `409` where they apply.
+- Declare a bearer security scheme for protected APIs, and keep internal paths out of the public description.
+- Use invented data in every example.
+- Generate clients from the description, and never hand-edit the generated code.
+- Protect the UI in production, or switch it off.
 
 ## Common pitfalls
 
-- Exposing internal or administrative endpoints in the public spec.
-- Including real secrets, tokens, or personal data in examples.
-- Documenting only the success response, so clients never handle `401`, `403`, or `409`.
-- Marking operations deprecated only in prose, so no tool or client reports it.
-- Writing the spec by hand and letting it drift from the code.
-- Leaving the Swagger UI open in production without any protection.
+- Publishing internal or administrative endpoints in the public description.
+- Placing real secrets, tokens, or personal data in examples.
+- Documenting only the success case, so clients never prepare for `401`, `403`, or `409`.
+- Declaring an operation deprecated in prose alone, so no tool or client notices.
+- Maintaining the description by hand until it drifts away from the code.
+- Leaving the Swagger UI open in production with no protection.
 
 !!! tip "Interview tip"
     **Q: Code-first or design-first OpenAPI, and why?**
-    For an internal service that changes often, code-first keeps the spec true with little effort. For a public API with many consumers, design-first lets the team review the contract before building it, and generated clients follow the same contract. I would say which I chose and what check keeps the spec honest.
+    For an internal service that changes frequently, code-first keeps the description accurate with little effort. For a public API with many consumers, design-first lets the team review the contract before any code exists, and the generated clients follow that same contract. State which approach you prefer, and name the check that keeps the description honest.
 
 ## Quick recap
 
-- OpenAPI describes paths, operations, schemas, and security; springdoc generates it from Spring code.
-- Annotate operations and models for descriptions, examples, and status codes, and document error responses too.
-- Add a bearer security scheme for protected APIs, and keep internal paths out of the public spec.
-- Generate clients from the spec so contract changes break the build, not production.
-- Choose code-first for speed or design-first for public contracts, and check the spec in tests.
+- OpenAPI describes paths, operations, schemas, and security. springdoc generates it from Spring code.
+- Annotate operations and models with descriptions, examples, and status codes, and cover the error responses as well.
+- Declare a bearer scheme for protected APIs, and keep internal paths out of the public description.
+- Generate clients from the description, so contract changes break the build instead of production.
+- Choose code-first for speed, or design-first for public contracts, and verify the description in tests.
+
+## Official documentation
+
+- [OpenAPI Specification](https://spec.openapis.org/oas/latest.html)
+- [springdoc-openapi project](https://springdoc.org/)
 
 **See also:** [REST Principles and Versioning](rest-principles-versioning.md), [API Security](api-security.md), [Pagination, Errors, and Idempotency](pagination-errors-idempotency.md)

@@ -1,29 +1,45 @@
 # Specific Databases
 
-Each database makes different trade-offs, and interviewers often ask you to justify a choice. This page covers the features roadmap section 6 names: MySQL storage engines, replication, and sharding; PostgreSQL's JSONB, full-text search, and extensions; Redis data structures and pub/sub; and an overview of NoSQL stores.
+!!! note "In simple words"
+    Databases are not interchangeable. MySQL, PostgreSQL, Redis, and NoSQL stores each make different trade-offs, so the right choice depends on what the feature needs to do: keep money safe, search text, serve a cache, or absorb a huge stream of writes.
 
-## Core concepts
+## Why it matters
+
+Interviewers often ask you to justify a database choice, not just name one. They want to hear which trade-off you accepted and why. This page covers the database features you are most likely to be asked about: MySQL storage engines, replication, and sharding; PostgreSQL's JSONB, full-text search, and extensions; Redis data structures and pub/sub; and an overview of NoSQL stores with the questions each one answers well.
+
+## How it works
 
 ### MySQL
 
-**InnoDB vs MyISAM.** InnoDB is the default storage engine in MySQL 5.5 and later. It supports transactions, row-level locking, and foreign keys, and it uses crash recovery. MyISAM does not support transactions and uses table-level locks for writes, so it suits only read-mostly, non-transactional workloads. For new tables, use InnoDB.
+**InnoDB versus MyISAM.** InnoDB is the default storage engine in MySQL 5.5 and later. It supports transactions, row-level locking, and foreign keys, and it recovers cleanly after a crash. MyISAM does not support transactions and locks the whole table for writes, so it suits only read-mostly workloads that do not need transactions. For new tables, use InnoDB.
 
 ```sql
 CREATE TABLE payment (
-    payment_id INT PRIMARY KEY,
+    payment_id   INT PRIMARY KEY,
     amount_cents INT NOT NULL
 ) ENGINE = InnoDB;
 ```
 
-**Replication.** A source (formerly "master") records changes in its binary log, and one or more replicas (formerly "slaves") apply them. Replication is asynchronous by default, so a replica can lag and a failover can lose recent commits. Semi-synchronous and group replication reduce that risk at the cost of latency. Read replicas scale reads but do not reduce write load, and reads from a replica may be stale.
+**Replication.** A source server (formerly called the master) records every change in its binary log. One or more replicas (formerly called slaves) read that log and apply the same changes. Replication is asynchronous by default, so a replica can lag behind the source, and a failover can lose the most recent commits. Semi-synchronous replication and group replication lower that risk, at the cost of extra latency on each write.
 
-**Sharding.** Sharding splits data across several database servers by a key, such as a customer ID. Each shard holds a subset of rows. Sharding adds complexity: cross-shard joins and transactions are hard, and resharding requires a plan. Shard only after vertical scaling, indexing, caching, and read replicas have been tried.
+```mermaid
+graph LR
+    App[Application writes] --> Src[Source server]
+    Src -->|binary log| R1[Replica 1]
+    Src -->|binary log| R2[Replica 2]
+    Reads[Application reads] --> R1
+    Reads --> R2
+```
 
-**Performance tuning.** Check the slow query log, use `EXPLAIN`, size the InnoDB buffer pool to fit the hot data, and keep the primary key short, because InnoDB stores secondary index entries that include the primary key.
+Read replicas scale reads, but they do not reduce the write load on the source. A read from a replica can return stale data, so send only reads that tolerate a short delay to a replica.
+
+**Sharding.** Sharding splits data across several database servers using a key, such as a customer ID. Each shard holds a subset of the rows. Sharding adds real complexity: joins and transactions across shards are hard, and changing the shard count later needs a careful migration plan. Shard only after you have tried better indexes, caching, vertical scaling, and read replicas.
+
+**Performance tuning.** Read the slow query log, use `EXPLAIN` on the slow statements, and size the InnoDB buffer pool so that hot data fits in memory. Keep the primary key short. InnoDB stores the primary key value inside every secondary index entry, so a long primary key makes every index larger.
 
 ### PostgreSQL
 
-**JSONB.** `JSON` stores the text as written. `JSONB` stores a decomposed binary form that can be indexed and queried efficiently. Use `JSONB` when you need to filter on fields inside the document.
+**JSONB.** The `JSON` type stores the text as it was written. The `JSONB` type stores a decomposed binary form that can be indexed and searched quickly. Use `JSONB` when you need to filter on fields inside the document.
 
 ```sql
 CREATE TABLE product (
@@ -35,12 +51,12 @@ CREATE INDEX idx_product_attributes ON product USING GIN (attributes);
 
 SELECT product_id
 FROM product
-WHERE attributes @> '{"colour": "red"}';   -- containment, uses the GIN index
+WHERE attributes @> '{"colour": "red"}';   -- containment, can use the GIN index
 ```
 
-Do not turn every table into JSON. Fields you query and join on belong in columns.
+Do not turn every table into JSON. Fields that you filter on, join on, or sort by belong in ordinary columns, where constraints and statistics work properly.
 
-**Full-text search.** PostgreSQL converts text into `tsvector` values and matches them with `tsquery`, using language rules such as stemming. A GIN index on the `tsvector` makes searches fast. This covers many search needs without an external search engine, though dedicated engines offer more ranking and language tooling.
+**Full-text search.** PostgreSQL converts text into `tsvector` values and matches them against a `tsquery`. Language rules such as stemming let "waterproofing" match "waterproof". A GIN index on the `tsvector` expression makes searches fast. This covers many search needs without an external search engine, although dedicated engines offer richer ranking and language tooling.
 
 ```sql
 SELECT product_id
@@ -51,18 +67,18 @@ WHERE to_tsvector('english', attributes->>'description')
 
 **Window functions.** PostgreSQL supports the full window function set described in [Advanced SQL and Transactions](advanced-sql-transactions.md).
 
-**Extensions.** PostgreSQL extends through extensions loaded with `CREATE EXTENSION`. Common examples include `pgcrypto` (cryptographic functions), `uuid-ossp` or built-in UUID generation, and PostGIS (geospatial data). Check that an extension is available on your managed service before you rely on it.
+**Extensions.** PostgreSQL gains features through extensions loaded with `CREATE EXTENSION`. Common examples are `pgcrypto` for cryptographic functions, `uuid-ossp` for UUID generation (built-in UUID generation exists in recent versions too), and PostGIS for geospatial data. Check that an extension is available on your managed database service before you rely on it.
 
 ### Redis
 
-Redis is an in-memory data store that keeps data in RAM and optionally persists it. Its value is in its data structures:
+Redis is an in-memory data store. It keeps its data in RAM and can persist it to disk. Its main value is its data structures:
 
 | Type | Typical use |
 |---|---|
 | Strings | Cache entries, counters (`INCR`), feature flags |
 | Lists | Simple queues, recent-items feeds |
 | Sets | Unique members, tags, membership tests |
-| Hashes | Objects with several fields (a user profile) |
+| Hashes | Objects with several fields, such as a user profile |
 | Sorted sets | Leaderboards, time-ordered indexes, rate-limit windows |
 
 ```text
@@ -72,45 +88,45 @@ ZADD leaderboard 1520 "ana"          # sorted set: score 1520 for member "ana"
 ZREVRANGE leaderboard 0 9            # top ten members
 ```
 
-**Pub/sub.** Publishers send messages to channels and subscribers receive them. Pub/sub is fire-and-forget: a subscriber that is offline misses the message. Use streams or a message broker when you need durability.
+**Pub/sub.** Publishers send messages to channels, and subscribers receive them. Pub/sub is fire-and-forget. A subscriber that is offline when a message is sent never sees it. Use Redis Streams or a dedicated message broker when messages must not be lost.
 
-**Transactions.** `MULTI` queues commands and `EXEC` runs them as one unit without interleaving from other clients. Redis does not roll back on a runtime error; a command that fails at run time is reported, and the others still run. Use `WATCH` for optimistic check-and-set.
+**Transactions.** `MULTI` queues commands, and `EXEC` runs them as one unit, without other clients' commands running in between. Redis does not roll back the other commands if one fails at run time. The failing command returns an error, and the rest still run. Use `WATCH` for an optimistic check-and-set: the `EXEC` is discarded if a watched key changed.
 
-Redis is usually a cache or a fast secondary store, not the system of record, unless you configure persistence and accept its trade-offs.
+Redis is usually a cache or a fast secondary store. It is not the system of record, unless you configure persistence and accept its trade-offs.
 
 ### NoSQL awareness
 
-Know these at the level of "what kind of data model, and when would you consider it":
+Know these stores at the level of "what kind of data model, and when would you consider it":
 
-- **MongoDB:** document store. Stores JSON-like documents in collections. Suits variable-shaped records; supports secondary indexes and multi-document transactions.
-- **Cassandra:** wide-column store designed for write-heavy workloads spread across many nodes. Data is modelled around the queries you need, and joins are not supported.
-- **DynamoDB:** managed key-value and document service. Access is through partition keys and sort keys; design access patterns first.
+- **MongoDB** is a document store. It keeps JSON-like documents in collections. It suits records whose shape varies, supports secondary indexes, and supports multi-document transactions.
+- **Cassandra** is a wide-column store built for write-heavy workloads spread across many nodes. You model tables around the queries you need, and it does not support joins.
+- **DynamoDB** is a managed key-value and document service. You access items through a partition key and an optional sort key, so you design the access patterns first.
 
-The common trade-off: relational databases give joins, constraints, and transactions; NoSQL stores give horizontal scale and flexible schemas, but you design for specific access patterns in advance.
+The common trade-off: relational databases give you joins, constraints, and transactions. NoSQL stores give you horizontal scale and flexible schemas, but you must know the access patterns in advance.
 
-### Relational vs NoSQL at a glance
+### Relational versus NoSQL at a glance
 
 | | Relational (SQL) | NoSQL (general) |
 |---|---|---|
 | Schema | Fixed and enforced by the database | Flexible, or none |
 | Scaling | Usually scaled up first; sharding adds work | Horizontal by design |
-| Consistency | Strong, with ACID transactions | Tunable; often BASE (see Advanced SQL and Transactions) |
+| Consistency | Strong, with ACID transactions | Tunable; often BASE (see [Advanced SQL and Transactions](advanced-sql-transactions.md)) |
 | Joins | Native | Limited or absent |
 | Best for | Integrity-critical data and complex queries | Scale, varied record shapes, known access patterns |
 
-Relational engines include MySQL, PostgreSQL, Oracle, SQL Server, and MariaDB. They share the SQL model but differ in syntax, extensions, and tooling, so check vendor syntax for upserts, paging, and identity columns before you port a query.
+Relational engines include MySQL, PostgreSQL, Oracle, SQL Server, and MariaDB. They share the SQL model, but they differ in syntax, extensions, and tooling. Check the vendor's syntax for upserts, paging, and identity columns before you port a query.
 
 ### NoSQL data models
 
 | Model | Examples | Structure | Typical use | Watch for |
 |---|---|---|---|---|
-| Key-value | Redis, Memcached, DynamoDB | A key maps to a value the store does not interpret | Caching, sessions, counters | Lookups by key only; other queries need a different store or index |
+| Key-value | Redis, Memcached, DynamoDB | A key maps to a value the store does not interpret | Caching, sessions, counters | Lookups by key only; other queries need another index or store |
 | Document | MongoDB, CouchDB, Firebase | JSON-like documents with flexible fields | Content, user profiles, catalogues | Consistency settings; work across many documents costs more |
 | Column-family | Cassandra, HBase, Bigtable | Wide, sparse rows grouped into column families | High write volume, time series, scans by key | Tables are designed per query; consistency is tunable |
 | Graph | Neo4j, ArangoDB | Nodes connected by typed relationships | Recommendations, social links, fraud rings | Strong for traversals; weaker for bulk aggregation |
 | Search engine | Elasticsearch, Solr | Inverted index over text fields | Full-text search, log search, faceted filters | Usually a secondary index, not the system of record |
 
-Pick the model from the question the application asks:
+### Choosing a model from the question
 
 | Need | Model | Example |
 |---|---|---|
@@ -121,15 +137,61 @@ Pick the model from the question the application asks:
 | Following relationships | Graph | Friend-of-friend queries |
 | Ranked text search | Search engine | Site search |
 
-## How it works / Step by step
+```mermaid
+flowchart TD
+    A[Start with the access pattern] --> B{Needs multi-row transactions}
+    B -->|Yes| C[Relational database]
+    B -->|No| D{Mostly key lookups}
+    D -->|Yes| E[Key-value store]
+    D -->|No| F{Text search}
+    F -->|Yes| G[Search engine]
+    F -->|No| H[Document or column-family store]
+```
 
-Choosing a database for a feature:
+### Step by step: choosing a database for a feature
 
-1. List the queries and their frequency, and the consistency the business needs.
+1. List the queries, how often each runs, and the consistency the business needs.
 2. Start with a relational database unless a clear requirement says otherwise.
 3. Add Redis for caching, rate limits, or short-lived state.
 4. Consider a document or wide-column store when the access pattern is known, the scale is high, and joins are not needed.
-5. Write down the trade-off you accepted (consistency, operations, cost, lock-in).
+5. Write down the trade-off you accepted: consistency, operations effort, cost, or vendor lock-in.
+
+## Where it is used
+
+- **MySQL with InnoDB** for web applications and order systems that need transactions and foreign keys.
+- **PostgreSQL** for complex queries, JSON documents with indexes, and built-in full-text search.
+- **Redis** for caching, session storage, rate limiting, and leaderboards.
+- **MongoDB** for product catalogues and content that vary in shape.
+- **Cassandra or DynamoDB** for high-volume event data with known access patterns.
+
+## Benefits
+
+- **Right tool for the job.** Matching the store to the access pattern avoids fighting the database.
+- **Mature relational options.** MySQL and PostgreSQL are well understood and well supported.
+- **Speed where it counts.** Redis serves hot data from memory, and NoSQL stores scale writes across nodes.
+- **Built-in features.** JSONB indexes, full-text search, and replication reduce the number of extra systems you run.
+
+## Cons and limits
+
+- **More systems to run.** Each extra store adds backups, monitoring, upgrades, and failure modes.
+- **Replication lag.** Replicas can be behind the source, so reads from them may be stale.
+- **Redis is memory-bound.** Data larger than RAM does not fit, and persistence has trade-offs.
+- **Limited joins and queries in NoSQL.** Access patterns must be known in advance, and changing them later can need a new table or index.
+- **Vendor differences.** Syntax and features differ, so a query that works in one relational database may need changes in another.
+
+## Best practices
+
+- Use InnoDB for new MySQL tables.
+- Do not send reads that need the latest data to a replica.
+- Shard only after the simpler options have been tried.
+- Index JSONB fields that you query, and keep the fields you join on as columns.
+- Treat Redis as a cache or a secondary store unless you have configured persistence and tested recovery.
+- Do not rely on pub/sub for messages that must not be lost.
+- Write down the access patterns before choosing a NoSQL store.
+
+!!! tip "Interview tip"
+    **Q: How would you scale reads on a relational database?**
+    Add indexes and fix the slow queries first. Then add a cache such as Redis for hot, rarely changing data. Then add read replicas, and send only reads that tolerate some staleness to them. Sharding is the last step, and it changes how you write joins and transactions.
 
 ## Common pitfalls
 
@@ -139,18 +201,20 @@ Choosing a database for a feature:
 - Using Redis as the only copy of data without persistence and a backup plan.
 - Relying on pub/sub for messages that must not be lost.
 - Putting every query field inside JSON and then scanning the whole table.
-- Choosing NoSQL because it is fashionable, without defining the access patterns.
-
-!!! tip "Interview tip"
-    **Q: How would you scale reads on a relational database?**
-    Add indexes and fix the slow queries first. Then add a cache such as Redis for hot, rarely changing data. Then add read replicas, and send only reads that tolerate some staleness to them. Sharding is the last step, and it changes how you write joins and transactions.
+- Choosing NoSQL because it is fashionable, without defining the access patterns first.
 
 ## Quick recap
 
-- MySQL: use InnoDB; replication is asynchronous by default; sharding is a last resort.
-- PostgreSQL: JSONB is indexable with GIN; full-text search uses `tsvector` and `tsquery`.
-- Redis: rich data structures in memory; pub/sub does not persist messages.
-- NoSQL stores trade joins and constraints for scale and flexible or query-specific models.
+- MySQL: use InnoDB. Replication is asynchronous by default. Sharding is a last resort.
+- PostgreSQL: JSONB can be indexed with GIN. Full-text search uses `tsvector` and `tsquery`.
+- Redis: rich data structures in memory. Pub/sub does not persist messages.
+- NoSQL stores trade joins and constraints for scale and query-specific models.
 - Choose a database from the access patterns, not from its popularity.
+
+## Official documentation
+
+- [PostgreSQL documentation](https://www.postgresql.org/docs/current/) (JSON types, full-text search, and extensions)
+- [MySQL 8.0 reference manual](https://dev.mysql.com/doc/) (storage engines and replication)
+- [Redis documentation](https://redis.io/docs/latest/) (data types, pub/sub, and transactions)
 
 **See also:** [Query Optimisation](query-optimisation.md), [Normalisation and Modelling](normalisation-modelling.md), [JDBC](../07-jdbc-jpa/jdbc.md)

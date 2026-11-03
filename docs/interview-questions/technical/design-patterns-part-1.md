@@ -6,7 +6,7 @@ This page is split into 2 parts. Continue to [Part 2](design-patterns-part-2.md)
 
 ---
 
-## 1. What is the Factory pattern and when should you use it?
+## 1. When would you reach for a Factory, and what does it do?
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -66,7 +66,7 @@ class VehicleFactory {
 
 ---
 
-## 2. What is the difference between Factory and Abstract Factory?
+## 2. How does an Abstract Factory differ from a plain Factory?
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -129,7 +129,7 @@ class DarkThemeFactory implements ThemeFactory {
 
 ---
 
-## 3. Explain the Builder pattern with a real example.
+## 3. Describe a Builder using a concrete scenario.
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -204,7 +204,7 @@ class EmailDemo {
 
 ---
 
-## 4. What is the Singleton pattern and when is it problematic?
+## 4. Where does a Singleton cause trouble, and what is it for?
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -271,7 +271,7 @@ public class ReportService {
 
 ---
 
-## 5. Explain the Strategy pattern and give a use case.
+## 5. Show how Strategy works and name a scenario where it fits.
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -344,7 +344,7 @@ Other examples in the JDK: `Comparator` passed to `List.sort`, and the compressi
 
 ---
 
-## 6. What is the Observer pattern and when would you use it?
+## 6. In which situations does an Observer make sense?
 
 <details markdown="1">
 <summary>View Answer</summary>
@@ -394,9 +394,9 @@ The JDK's `java.util.Observable` and `Observer` types were deprecated in Java 9.
 
 ### Observer vs Pub/Sub
 
-| Aspect | Observer | Pub/Sub |
+| Dimension | Observer | Pub/Sub |
 |--------|----------|---------|
-| Coupling | Subject holds listener references | Publishers and subscribers share a broker or topic |
+| Coupling | The subject keeps direct references to listeners | Publishers and subscribers meet through a broker or topic |
 | Delivery | Direct call, in the same process | Through a broker, often across processes |
 | Failure handling | An exception from a listener can stop the loop | The broker can retry, persist, and isolate consumers |
 | Examples | UI listeners, in-process events | Kafka, RabbitMQ, SNS/SQS |
