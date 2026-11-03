@@ -59,7 +59,7 @@ SECTIONS = {
                                           "transformer", "precision", "recall", "supervised", "bias-variance",
                                           "embedding"],
 }
-COMPANY_NAMES = ["walmart", "costco", "equifax", "tcs", "wipro", "ibs", "uniqlo"]
+COMPANY_NAMES = ["costco", "equifax", "tcs", "wipro", "ibs", "uniqlo"]
 
 
 def normalise(text: str) -> list[str]:

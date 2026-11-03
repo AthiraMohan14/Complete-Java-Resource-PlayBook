@@ -1,4 +1,4 @@
-# WLMrt L1 Interview (Round 1: Java requirement)
+# Client L1 Interview (Round 1: Java requirement)
 
 Technical questions for the first round: Java, Spring, messaging, data, and DevOps. ⭐ marks a question that also appears in the QuestioRex bank.
 
@@ -1461,7 +1461,7 @@ jobs:
 - *What is GitOps?* Git holds the desired state of the cluster, and a tool such as Argo CD keeps the cluster matched to it.
 
 
-# WLMrt Client Interview (Round 2)
+# Client Interview (Round 2)
 
 Introduction, project, design, testing, and experience questions. Answers that describe your own work are templates with [brackets] to fill in. ⭐ marks a question that also appears in the QuestioRex bank.
 
@@ -2415,7 +2415,7 @@ Scenario: customer places an order
 
 ---
 
-### 15. Do you have experience with Wlmrtt previously?
+### 15. Do you have experience with the client previously?
 
 **Simple explanation:** The interviewer wants to know if you have worked with this client before. Answer honestly, then show how your experience fits their scale and needs.
 
@@ -2849,9 +2849,9 @@ public class DtoDemo {
 - *Why not use the entity as the DTO to save code?* It saves a few lines but couples the API to the table and risks leaking fields later.
 - *What causes an infinite JSON loop?* Two entities that point to each other, such as parent and child, which Jackson follows forever. A DTO that holds only IDs or simple fields avoids it.
 
-# WLMrt QuestioRex Question Bank
+# Client QuestioRex Question Bank
 
-All questions from the QuestioRex list in the Wlmrt notes, with detailed answers, grouped by topic. ⭐ marks a question that is also in the L1 or client interview list.
+All questions from the QuestioRex list in the client notes, with detailed answers, grouped by topic. ⭐ marks a question that is also in the L1 or client interview list.
 
 ---
 
@@ -7441,7 +7441,7 @@ gcloud run deploy order-service \
 - **What is a health check?** A URL, such as /actuator/health, that returns UP when the app is ready.
 - **Where do config values come from?** Environment variables or a config service, injected at deploy time.
 
-### How does Wlmrt integrate and utilize Google Cloud Platform (GCP) within its operations and infrastructure?
+### How does the client integrate and utilize Google Cloud Platform (GCP) within its operations and infrastructure?
 
 *Note: I do not have verified internal details about how this company uses GCP. The answer below describes common patterns for large retailers. Check the company's public engineering posts before the interview.*
 
