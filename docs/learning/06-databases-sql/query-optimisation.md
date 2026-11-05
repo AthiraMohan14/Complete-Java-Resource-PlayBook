@@ -30,6 +30,8 @@ flowchart LR
 
 ### Indexes
 
+Speed up queries at cost of slower writes.
+
 An index is a separate structure that maps column values to row locations. With an index, the database can find the matching rows without reading the whole table.
 
 | Index type | Good for | Notes |
@@ -44,13 +46,29 @@ Bitmap indexes are common in data-warehouse systems. Most transactional database
 A composite index on `(customer_id, created_on)` supports queries that filter on `customer_id` alone, and queries that filter on both columns. It does not help a filter on `created_on` alone. This is the leftmost-prefix rule.
 
 ```sql
+-- Create index
+CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_orders_customer_date ON orders (customer_id, created_on);
+
+-- Query uses index if condition matches
+SELECT * FROM users WHERE email = 'alice@example.com';  -- ✅ Uses idx_users_email
 
 -- Uses the index: the leftmost column is filtered
 SELECT order_id FROM orders WHERE customer_id = 42 AND created_on >= DATE '2026-01-01';
 
 -- Usually cannot use this index efficiently
 SELECT order_id FROM orders WHERE created_on >= DATE '2026-01-01';
+
+-- Composite index (leftmost-prefix rule)
+SELECT * FROM orders 
+WHERE user_id = 1 AND created_at > '2024-01-01';  -- ✅ Uses composite index
+
+SELECT * FROM orders 
+WHERE created_at > '2024-01-01';  -- ❌ Doesn't use composite index (created_at not first)
+
+-- Check query plan (MySQL)
+EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
+-- Look for: Using index, Index range, no Full table scan
 ```
 
 Indexes are not free. Each one slows inserts and updates, takes storage, and must be maintained. Add indexes for the queries you actually run, and remove the ones nothing uses.
@@ -58,6 +76,11 @@ Indexes are not free. Each one slows inserts and updates, takes storage, and mus
 A unique index is also a constraint: it rejects duplicate values. Upserts need one as their conflict target (see [Intermediate SQL](intermediate-sql.md)).
 
 Dropping an index uses vendor-specific syntax. MySQL and SQL Server use `DROP INDEX idx_orders_customer_date ON orders;`. PostgreSQL uses `DROP INDEX idx_orders_customer_date;`. PostgreSQL's `DROP INDEX CONCURRENTLY` avoids blocking writes on a busy table, and `CREATE INDEX CONCURRENTLY` does the same when creating one.
+
+```sql
+-- Drop index if not needed
+DROP INDEX idx_users_email ON users;
+```
 
 ### Reading execution plans with EXPLAIN
 

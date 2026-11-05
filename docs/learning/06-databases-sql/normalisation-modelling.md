@@ -1,5 +1,7 @@
 # Normalisation and Data Modelling
 
+Normalization :- Reduce redundancy and anomalies.
+
 !!! note "In simple words"
     Normalisation means storing each fact in one place, so that when a fact changes you update it once. Data modelling is the step before you write `CREATE TABLE`, where you sketch the things you store and how they relate.
 
@@ -17,13 +19,10 @@ A **candidate key** is a minimal set of columns that uniquely identifies a row. 
 
 ### The path through the normal forms
 
-```mermaid
-flowchart LR
-    A[Raw table] --> B[1NF atomic values]
-    B --> C[2NF no partial dependency]
-    C --> D[3NF no transitive dependency]
-    D --> E[BCNF every determinant is a key]
-```
+- **1NF**: Atomic values, no repeating groups
+- **2NF**: 1NF + no partial dependency on composite key
+- **3NF**: 2NF + no transitive dependency (non-key doesn't depend on non-key)
+- **BCNF**: Stricter 3NF (every determinant is a key)
 
 Each form builds on the previous one. Most production schemas aim for 3NF, and check BCNF when a table has overlapping candidate keys.
 
@@ -64,6 +63,44 @@ Problem: `orders(order_id, customer_id, customer_city)`. `customer_city` depends
 A table is in BCNF when, for every non-trivial functional dependency `X -> Y`, the left side `X` is a superkey. BCNF is slightly stricter than 3NF. The difference shows up when a table has several overlapping candidate keys.
 
 Example: a table with `student`, `course`, and `tutor`. Assume each tutor teaches only one course, so `tutor -> course`. The candidate keys are `(student, course)` and `(student, tutor)`. The dependency `tutor -> course` has `tutor` on the left, and `tutor` is not a superkey, so the table is in 3NF but not in BCNF. The fix is to split out a `tutor(tutor, course)` table.
+
+---
+
+**Example: Normalize to 3NF**
+```sql
+-- ❌ Non-normalized (redundant data)
+CREATE TABLE orders_bad (
+    order_id INT,
+    user_id INT,
+    user_name VARCHAR(100),  -- Redundant (repeats for each order)
+    user_email VARCHAR(100),  -- Redundant
+    product_name VARCHAR(100),  -- Redundant
+    amount DECIMAL(10, 2)
+);
+
+-- ✅ Normalized (3NF)
+CREATE TABLE users (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(100)
+);
+
+CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    user_id INT,
+    amount DECIMAL(10, 2),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE order_items (
+    order_id INT,
+    product_id INT,
+    quantity INT,
+    PRIMARY KEY (order_id, product_id),
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+```
+---
 
 ### Denormalisation trade-offs
 

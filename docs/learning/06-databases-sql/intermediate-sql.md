@@ -11,7 +11,42 @@ The queries most applications need are not the simple ones. They filter by sever
 
 ### Filtering, sorting, and paging
 
+Filter rows based on conditions.
+
 ```sql
+-- Equality
+SELECT * FROM users WHERE age = 30;
+
+-- Comparison operators
+SELECT * FROM users WHERE age > 25;
+SELECT * FROM users WHERE age >= 25;
+SELECT * FROM users WHERE age < 30;
+SELECT * FROM users WHERE age <= 30;
+SELECT * FROM users WHERE age <> 30;  -- NOT equal
+
+-- AND / OR
+SELECT * FROM users WHERE age > 25 AND city = 'New York';
+SELECT * FROM users WHERE age > 25 OR city = 'New York';
+SELECT * FROM users WHERE (age > 25 OR age < 20) AND city = 'New York';
+
+-- IN (multiple values)
+SELECT * FROM users WHERE id IN (1, 3, 5);
+SELECT * FROM orders WHERE status IN ('PENDING', 'PROCESSING', 'SHIPPED');
+
+-- BETWEEN (inclusive)
+SELECT * FROM users WHERE age BETWEEN 25 AND 35;
+
+-- LIKE (pattern matching)
+SELECT * FROM users WHERE name LIKE 'A%';        -- Starts with A
+SELECT * FROM users WHERE name LIKE '%a';        -- Ends with a
+SELECT * FROM users WHERE name LIKE '%li%';      -- Contains li
+SELECT * FROM users WHERE email LIKE '%.com';    -- Email ends with .com
+
+-- IS NULL / IS NOT NULL
+SELECT * FROM users WHERE email IS NULL;
+SELECT * FROM users WHERE email IS NOT NULL;
+
+-- filtering, sorting and paging
 SELECT DISTINCT customer_id
 FROM orders
 WHERE status IN ('PAID', 'SHIPPED')
@@ -42,6 +77,16 @@ Common row filters:
 A join combines rows from two tables when a condition holds.
 
 ```sql
+-- INNER JOIN: Only matching rows
+SELECT 
+    users.id,
+    users.name,
+    orders.id AS order_id,
+    orders.amount
+FROM users
+INNER JOIN orders ON users.id = orders.user_id
+WHERE orders.amount > 50;
+
 SELECT c.full_name, o.order_id, o.total_cents
 FROM customer AS c
 INNER JOIN orders AS o ON o.customer_id = c.customer_id;
@@ -70,16 +115,64 @@ SELECT c.customer_id
 FROM customer AS c
 LEFT JOIN orders AS o ON o.customer_id = c.customer_id
 WHERE o.order_id IS NULL;
+
+-- LEFT JOIN: All left rows + matched right (NULL for non-matching)
+SELECT 
+    users.name,
+    orders.amount,
+    orders.created_at
+FROM users
+LEFT JOIN orders ON users.id = orders.user_id;
+-- Result: All users, even if they have no orders (NULL in order columns)
+
 ```
 
 Put a condition on the right table inside the `ON` clause of a `LEFT JOIN`, not in `WHERE`. A `WHERE` filter on the right table removes the NULL rows, which turns the join into an inner join without any warning.
 
+```sql
+-- RIGHT JOIN: All right rows + matched left
+SELECT 
+    users.name,
+    orders.amount
+FROM users
+RIGHT JOIN orders ON users.id = orders.user_id;
+-- Result: All orders, with NULL if user deleted
+
+-- FULL OUTER JOIN: All rows from both tables
+SELECT 
+    users.name,
+    orders.amount
+FROM users
+FULL OUTER JOIN orders ON users.id = orders.user_id;
+
+-- Multiple JOINs
+SELECT 
+    u.name,
+    o.amount,
+    oi.quantity,
+    p.name AS product_name
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE o.created_at >= '2024-01-01';
+
+```
+
 A self-join links a table to itself. Here each employee is paired with their manager:
 
 ```sql
+-- SELF JOIN (table joined to itself)
+SELECT 
+    e1.name AS employee,
+    e2.name AS manager
+FROM employees e1
+LEFT JOIN employees e2 ON e1.manager_id = e2.id;
+
 SELECT e.full_name AS employee, m.full_name AS manager
 FROM employee AS e
 LEFT JOIN employee AS m ON m.employee_id = e.manager_id;
+
 ```
 
 ### Aggregates and GROUP BY
@@ -87,16 +180,102 @@ LEFT JOIN employee AS m ON m.employee_id = e.manager_id;
 Aggregates collapse many rows into one value: `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. `COUNT(*)` counts rows, and `COUNT(column)` skips NULLs.
 
 ```sql
-SELECT customer_id,
-       COUNT(*)         AS order_count,
-       SUM(total_cents) AS spent_cents
+-- COUNT: number of rows
+SELECT COUNT(*) AS total_users FROM users;
+SELECT COUNT(email) FROM users;  -- NULL emails excluded
+
+-- SUM: total
+SELECT SUM(amount) AS total_revenue FROM orders;
+
+-- AVG: average
+SELECT AVG(amount) AS avg_order_value FROM orders;
+
+-- MIN / MAX
+SELECT MIN(age) AS youngest, MAX(age) AS oldest FROM users;
+
+-- GROUP BY: group rows by column(s)
+SELECT 
+    city,
+    COUNT(*) AS user_count,
+    AVG(age) AS avg_age
+FROM users
+GROUP BY city;
+
+-- GROUP BY multiple columns
+SELECT 
+    DATE_TRUNC('month', created_at) AS month,
+    status,
+    COUNT(*) AS order_count,
+    SUM(amount) AS total_amount
 FROM orders
-WHERE status = 'PAID'
-GROUP BY customer_id
-HAVING COUNT(*) >= 3;
+GROUP BY DATE_TRUNC('month', created_at), status;
+
+-- Common aggregates with grouping
+SELECT 
+    user_id,
+    COUNT(*) AS num_orders,
+    SUM(amount) AS total_spent,
+    AVG(amount) AS avg_order_value,
+    MIN(amount) AS min_order,
+    MAX(amount) AS max_order
+FROM orders WHERE status = 'PAID'
+GROUP BY user_id
+HAVING SUM(amount) > 1000;  -- Only users who spent > 1000
+
 ```
 
 `WHERE` filters rows before grouping. `HAVING` filters groups after aggregation. Every column in `SELECT` must either appear in `GROUP BY` or sit inside an aggregate.
+
+---
+
+## WHERE vs HAVING
+
+| Clause | When | Filters |
+|--------|------|---------|
+| **WHERE** | Before grouping | Individual rows |
+| **HAVING** | After grouping | Grouped rows / aggregates |
+
+```sql
+-- HAVING: filter AFTER grouping (use WHERE before grouping, HAVING after)
+SELECT 
+    city,
+    COUNT(*) AS user_count
+FROM users
+WHERE age > 25          -- ← Filters rows BEFORE grouping
+GROUP BY city
+HAVING COUNT(*) > 5;    -- ← Filters groups AFTER aggregation (cities with >5 users)
+```
+
+---
+
+## ORDER BY (Sorting)
+
+Sort results.
+
+```sql
+-- Ascending (default)
+SELECT * FROM users ORDER BY age;
+SELECT * FROM users ORDER BY age ASC;
+
+-- Descending
+SELECT * FROM users ORDER BY age DESC;
+
+-- Multiple columns
+SELECT * FROM users ORDER BY age DESC, name ASC;
+-- Sorts by age (descending), then by name (ascending)
+
+-- Order by expression
+SELECT 
+    name,
+    age,
+    (2024 - birth_year) AS calculated_age
+FROM users
+ORDER BY (2024 - birth_year) DESC;
+
+-- LIMIT with ORDER BY (top N)
+SELECT * FROM orders ORDER BY amount DESC LIMIT 5;  -- Top 5 orders
+```
+---
 
 ### Subqueries
 
@@ -113,6 +292,28 @@ WHERE o.total_cents > (
     FROM orders AS o2
     WHERE o2.customer_id = o.customer_id
 );
+
+-- Subquery in WHERE
+SELECT * FROM users 
+WHERE id IN (
+    SELECT user_id FROM orders WHERE amount > 100
+);
+
+-- Subquery in FROM
+SELECT user_summary.user_id, user_summary.total_orders
+FROM (
+    SELECT user_id, COUNT(*) AS total_orders
+    FROM orders
+    GROUP BY user_id
+) AS user_summary
+WHERE user_summary.total_orders > 5;
+
+-- Correlated subquery (references outer query)
+SELECT u.name, u.email
+FROM users u
+WHERE (
+    SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id
+) > 3;  -- Users with >3 orders
 ```
 
 `EXISTS` checks whether a subquery returns at least one row. It often beats `IN` on large sets because it can stop at the first match:
@@ -131,18 +332,60 @@ Prefer `NOT EXISTS` over `NOT IN` with a subquery. If the subquery returns even 
 
 `UNION` combines two results and removes duplicates. `UNION ALL` keeps duplicates and is faster because it skips the duplicate check. `INTERSECT` returns rows that appear in both results. `EXCEPT` returns rows in the first result that are not in the second; Oracle calls it `MINUS`. Both sides need the same number of columns, with compatible types.
 
+```sql
+-- UNION: combine with DISTINCT
+SELECT name, email, 'user' AS source FROM users
+UNION
+SELECT company_name, contact_email, 'company' FROM companies;
+
+-- UNION ALL: keep duplicates
+SELECT name FROM employees
+UNION ALL
+SELECT name FROM contractors;
+```
+
 ### CASE expressions
 
 `CASE` works like an if-else inside a query:
 
 ```sql
-SELECT order_id,
-       CASE
-           WHEN total_cents >= 10000 THEN 'large'
-           WHEN total_cents >= 1000  THEN 'medium'
-           ELSE 'small'
-       END AS size_band
-FROM orders;
+-- Simple CASE
+SELECT 
+    name,
+    age,
+    CASE age
+        WHEN 18 THEN 'Young Adult'
+        WHEN 25 THEN 'Adult'
+        ELSE 'Senior'
+    END AS age_group
+FROM users;
+
+-- Searched CASE (more flexible)
+SELECT 
+    name,
+    age,
+    CASE 
+        WHEN age < 18 THEN 'Minor'
+        WHEN age BETWEEN 18 AND 25 THEN 'Young Adult'
+        WHEN age BETWEEN 26 AND 65 THEN 'Adult'
+        ELSE 'Senior'
+    END AS age_category
+FROM users;
+
+-- CASE with aggregation
+SELECT 
+    CASE status
+        WHEN 'SHIPPED' THEN 'Completed'
+        WHEN 'PENDING' THEN 'Incomplete'
+        ELSE 'Other'
+    END AS order_status,
+    COUNT(*) AS count
+FROM orders
+GROUP BY CASE status
+    WHEN 'SHIPPED' THEN 'Completed'
+    WHEN 'PENDING' THEN 'Incomplete'
+    ELSE 'Other'
+END;
 ```
 
 ### Updating and deleting related rows

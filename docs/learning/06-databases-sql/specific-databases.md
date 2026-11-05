@@ -20,6 +20,12 @@ CREATE TABLE payment (
 ) ENGINE = InnoDB;
 ```
 
+## Replication
+Copies of data across nodes for **read scaling + high availability**.
+- **Leader-follower (primary-replica)** — writes to leader, reads from replicas; async (lag) vs sync (slower).
+- **Multi-leader / leaderless** (Dynamo-style) — higher availability, conflict resolution needed.
+- Failover: promote a replica when the leader dies.
+
 **Replication.** A source server (formerly called the master) records every change in its binary log. One or more replicas (formerly called slaves) read that log and apply the same changes. Replication is asynchronous by default, so a replica can lag behind the source, and a failover can lose the most recent commits. Semi-synchronous replication and group replication lower that risk, at the cost of extra latency on each write.
 
 ```mermaid
@@ -33,9 +39,23 @@ graph LR
 
 Read replicas scale reads, but they do not reduce the write load on the source. A read from a replica can return stale data, so send only reads that tolerate a short delay to a replica.
 
+## Partitioning / Sharding
+Split data across nodes for **write scaling** + larger datasets.
+- **Horizontal (sharding)** — rows split by a **shard key** (range, hash, or directory-based).
+- **Vertical** — split columns/tables by access pattern.
+- **Consistent hashing** — minimizes reshuffling when nodes are added/removed.
+- Challenges: cross-shard joins/transactions, hotspots (bad shard key), rebalancing.
+
 **Sharding.** Sharding splits data across several database servers using a key, such as a customer ID. Each shard holds a subset of the rows. Sharding adds real complexity: joins and transactions across shards are hard, and changing the shard count later needs a careful migration plan. Shard only after you have tried better indexes, caching, vertical scaling, and read replicas.
 
+## Consistency (CAP applied)
+- Under a partition, choose **CP** (reject to stay consistent) or **AP** (serve, reconcile later).
+- **Quorum** reads/writes (`R + W > N`) tune the consistency/availability balance.
+
 **Performance tuning.** Read the slow query log, use `EXPLAIN` on the slow statements, and size the InnoDB buffer pool so that hot data fits in memory. Keep the primary key short. InnoDB stores the primary key value inside every secondary index entry, so a long primary key makes every index larger.
+
+## Caching in front of the DB
+Cache hot reads (Redis) to offload the database — see [Caching](../distributed-cloud/caching.md).
 
 ### PostgreSQL
 
@@ -108,11 +128,11 @@ The common trade-off: relational databases give you joins, constraints, and tran
 
 | | Relational (SQL) | NoSQL (general) |
 |---|---|---|
-| Schema | Fixed and enforced by the database | Flexible, or none |
-| Scaling | Usually scaled up first; sharding adds work | Horizontal by design |
-| Consistency | Strong, with ACID transactions | Tunable; often BASE (see [Advanced SQL and Transactions](advanced-sql-transactions.md)) |
-| Joins | Native | Limited or absent |
-| Best for | Integrity-critical data and complex queries | Scale, varied record shapes, known access patterns |
+| Schema | Fixed , structured and enforced by the database | Flexible / schemaless |
+| Scaling | Usually scaled up first; sharding adds work. vertical (mostly) | Horizontal by design |
+| Consistency | Strong, with ACID transactions | Tunable / eventual; often BASE (see [Advanced SQL and Transactions](advanced-sql-transactions.md)) |
+| Joins | Native (yes) | Limited or absent |
+| Best for | transactions, relations, Integrity-critical data and complex queries | Huge Scale, flexible data, high write throughput, varied record shapes, known access patterns |
 
 Relational engines include MySQL, PostgreSQL, Oracle, SQL Server, and MariaDB. They share the SQL model, but they differ in syntax, extensions, and tooling. Check the vendor's syntax for upserts, paging, and identity columns before you port a query.
 
@@ -216,5 +236,7 @@ flowchart TD
 - [PostgreSQL documentation](https://www.postgresql.org/docs/current/) (JSON types, full-text search, and extensions)
 - [MySQL 8.0 reference manual](https://dev.mysql.com/doc/) (storage engines and replication)
 - [Redis documentation](https://redis.io/docs/latest/) (data types, pub/sub, and transactions)
+
+**Practice questions:** [Database Scaling and Architecture](../interview-questions/verbal/verbal-db-scaling-questions.md), [Databases & SQL](../interview-questions/verbal/verbal-db-questions.md)
 
 **See also:** [Query Optimisation](query-optimisation.md), [Normalisation and Modelling](normalisation-modelling.md), [JDBC](../07-jdbc-jpa/jdbc.md)

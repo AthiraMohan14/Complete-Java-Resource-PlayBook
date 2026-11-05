@@ -38,12 +38,37 @@ SQL statements fall into five groups. Interviewers sometimes ask you to name the
 Data Definition Language creates and changes schema objects.
 
 ```sql
+-- Basic table
 CREATE TABLE customer (
-    customer_id  INT PRIMARY KEY,
-    email        VARCHAR(255) NOT NULL UNIQUE,
+    customer_id  INT PRIMARY KEY AUTO_INCREMENT,
     full_name    VARCHAR(120) NOT NULL,
-    created_on   DATE NOT NULL DEFAULT CURRENT_DATE
+    email        VARCHAR(255) NOT NULL UNIQUE,
+    age INT CHECK (age >= 0),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Table with foreign key
+CREATE TABLE orders (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    amount DECIMAL(10, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Table with composite primary key
+CREATE TABLE order_items (
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    price DECIMAL(10, 2),
+    PRIMARY KEY (order_id, product_id),
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+-- Create index for faster queries
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_orders_user_id ON orders(user_id);
 
 ALTER TABLE customer ADD COLUMN phone VARCHAR(20);
 
@@ -60,25 +85,100 @@ Key differences:
 
 The `ADD COLUMN` form above is standard in PostgreSQL and MySQL. SQL Server writes `ALTER TABLE customer ADD phone VARCHAR(20)` without the `COLUMN` keyword.
 
+---
+
 ### DML: reading and changing data
 
 Data Manipulation Language reads and modifies rows.
 
 ```sql
+-- Single row
 INSERT INTO customer (customer_id, email, full_name)
 VALUES (1, 'ana@example.com', 'Ana Silva');
 
+-- Multiple rows
+INSERT INTO users (name, email, age) 
+VALUES 
+    ('Bob', 'bob@example.com', 25),
+    ('Charlie', 'charlie@example.com', 35),
+    ('Diana', 'diana@example.com', 28);
+
+-- Insert from another table
+INSERT INTO users_backup (name, email, age)
+SELECT name, email, age FROM users WHERE age > 30;
+
+-- Insert with auto-generated ID (can retrieve with LAST_INSERT_ID())
+INSERT INTO orders (user_id, amount) VALUES (1, 99.99);
+SELECT LAST_INSERT_ID();  -- Returns: 1
+
+-- Select query
 SELECT customer_id, full_name
 FROM customer
 WHERE email = 'ana@example.com';
-
-UPDATE customer
-SET phone = '555-0100'
-WHERE customer_id = 1;
-
-DELETE FROM customer
-WHERE customer_id = 1;
 ```
+
+---
+
+## UPDATE (DML)
+
+Modify existing rows.
+
+```sql
+-- Update single row
+UPDATE users 
+SET age = 31, email = 'newemail@example.com'
+WHERE id = 1;
+
+-- Update multiple rows
+UPDATE users 
+SET active = true
+WHERE created_at >= '2024-01-01';
+
+-- Update with calculation
+UPDATE orders 
+SET amount = amount * 1.1  -- 10% increase
+WHERE created_at < '2024-01-01';
+
+-- UPDATE with JOIN (update based on related table)
+UPDATE users u
+SET subscription_level = 'premium'
+WHERE EXISTS (
+    SELECT 1 FROM orders o 
+    WHERE o.user_id = u.id 
+    AND o.amount > 1000
+);
+
+-- Be careful! Missing WHERE updates all rows
+UPDATE users SET age = 25;  -- ❌ DANGEROUS: updates ALL users!
+```
+
+---
+
+## DELETE (DML)
+
+Remove rows.
+
+```sql
+-- Delete single row
+DELETE FROM users WHERE id = 5;
+
+-- Delete multiple rows
+DELETE FROM orders 
+WHERE created_at < '2020-01-01';
+
+-- Delete with JOIN
+DELETE FROM orders o
+WHERE NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.id = o.user_id
+);  -- Delete orphaned orders
+
+-- Be careful! Missing WHERE deletes all rows
+DELETE FROM users;  -- ❌ DANGEROUS: deletes ALL users!
+
+-- Truncate: delete all rows (faster than DELETE, can't rollback)
+TRUNCATE TABLE users;  -- ⚠️ Use with caution
+```
+
 
 Always include a `WHERE` clause in `UPDATE` and `DELETE` unless you really mean to change every row. A good habit is to run the matching `SELECT` first and check the row count.
 
@@ -96,6 +196,172 @@ WHERE created_on < DATE '2020-01-01';
 ```
 
 To get back a generated key, the syntax depends on the database. MySQL offers `LAST_INSERT_ID()` after the insert. PostgreSQL appends `RETURNING customer_id` to the statement, and SQL Server uses an `OUTPUT` clause.
+
+---
+
+## UPSERT (INSERT or UPDATE)
+
+**UPSERT** — Insert if not exists, update if already exists. Use case: sync data from external sources.
+
+### MySQL: INSERT ... ON DUPLICATE KEY UPDATE
+
+```sql
+-- If unique key/primary key exists, update; otherwise insert
+INSERT INTO users (id, name, email, age)
+VALUES (1, 'John', 'john@example.com', 30)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    email = VALUES(email),
+    age = VALUES(age);
+
+-- Update only specific columns
+INSERT INTO users (email, name)
+VALUES ('alice@example.com', 'Alice')
+ON DUPLICATE KEY UPDATE
+    name = 'Alice',
+    updated_at = NOW();
+
+-- MySQL 8.0.20+: Use NEW keyword
+INSERT INTO users (id, name, email)
+VALUES (1, 'John', 'john@example.com')
+ON DUPLICATE KEY UPDATE
+    name = NEW.name,
+    email = NEW.email;
+
+-- Bulk upsert multiple rows
+INSERT INTO users (id, name, email, age)
+VALUES 
+    (1, 'John', 'john@example.com', 30),
+    (2, 'Jane', 'jane@example.com', 25),
+    (3, 'Bob', 'bob@example.com', 35)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    email = VALUES(email),
+    age = VALUES(age);
+```
+
+### PostgreSQL: INSERT ... ON CONFLICT DO UPDATE
+
+```sql
+-- Insert, or update on conflict with unique/primary key
+INSERT INTO users (id, name, email, age)
+VALUES (1, 'John', 'john@example.com', 30)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    email = EXCLUDED.email,
+    age = EXCLUDED.age;
+
+-- Conflict on composite unique key
+INSERT INTO user_settings (user_id, setting_key, setting_value)
+VALUES (1, 'theme', 'dark')
+ON CONFLICT (user_id, setting_key) DO UPDATE SET
+    setting_value = EXCLUDED.setting_value,
+    updated_at = NOW();
+
+-- Don't update, just ignore conflict
+INSERT INTO users (id, name, email)
+VALUES (1, 'John', 'john@example.com')
+ON CONFLICT (id) DO NOTHING;
+```
+
+### SQL Server: MERGE Statement
+
+```sql
+-- Most flexible: can INSERT, UPDATE, DELETE in one statement
+MERGE INTO users AS target
+USING (SELECT 1 AS id, 'John' AS name, 'john@example.com' AS email, 30 AS age) AS source
+ON target.id = source.id
+WHEN MATCHED THEN
+    UPDATE SET 
+        target.name = source.name,
+        target.email = source.email,
+        target.age = source.age
+WHEN NOT MATCHED THEN
+    INSERT (id, name, email, age)
+    VALUES (source.id, source.name, source.email, source.age);
+
+-- Bulk merge
+MERGE INTO users AS target
+USING (VALUES 
+    (1, 'John', 'john@example.com', 30),
+    (2, 'Jane', 'jane@example.com', 25)
+) AS source(id, name, email, age)
+ON target.id = source.id
+WHEN MATCHED THEN
+    UPDATE SET name = source.name, email = source.email, age = source.age
+WHEN NOT MATCHED THEN
+    INSERT (id, name, email, age) VALUES (source.id, source.name, source.email, source.age);
+
+-- Also allow DELETE
+MERGE INTO users AS target
+USING source_data AS source
+ON target.id = source.id
+WHEN MATCHED THEN UPDATE SET ...
+WHEN NOT MATCHED THEN INSERT ...
+WHEN NOT MATCHED BY SOURCE AND created_before = '2020-01-01' THEN DELETE;
+```
+
+### Alternative: Check & Do-If Pattern
+
+For databases without native UPSERT:
+
+```sql
+-- Check if exists, then decide
+SET @id = 1;
+SET @name = 'John';
+SET @email = 'john@example.com';
+
+IF EXISTS(SELECT 1 FROM users WHERE id = @id)
+    UPDATE users SET name = @name, email = @email WHERE id = @id;
+ELSE
+    INSERT INTO users (id, name, email) VALUES (@id, @name, @email);
+```
+
+### Performance Considerations
+
+- **Single UPSERT** — Atomic, no race conditions
+- **Bulk UPSERT** — Much faster than row-by-row inserts/updates
+- **Indexes** — Ensure unique key is indexed for UPSERT performance
+
+```sql
+-- Create unique index for UPSERT to work efficiently
+CREATE UNIQUE INDEX idx_users_email ON users(email);
+
+-- Now upsert by email
+INSERT INTO users (email, name)
+VALUES ('john@example.com', 'John')
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+```
+
+---
+
+## SELECT (DML)
+
+Query and retrieve data.
+
+```sql
+-- Basic SELECT
+SELECT id, name, email FROM users;
+
+-- SELECT all columns
+SELECT * FROM users;
+
+-- WITH aliases
+SELECT 
+    id AS user_id,
+    name AS full_name,
+    email AS user_email
+FROM users;
+
+-- DISTINCT values (remove duplicates)
+SELECT DISTINCT city FROM users;
+
+-- LIMIT and OFFSET (pagination)
+SELECT * FROM users LIMIT 10 OFFSET 20;  -- Skip 20, take 10
+SELECT * FROM users LIMIT 20, 10;  -- MySQL shorthand (offset, limit)
+```
+
+---
 
 ### Constraints
 

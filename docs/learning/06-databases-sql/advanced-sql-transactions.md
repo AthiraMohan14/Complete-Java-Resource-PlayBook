@@ -83,10 +83,12 @@ Guard against cycles in the data. If one manager reports to someone who reports 
 A transaction groups statements so they succeed or fail as one unit.
 
 ```sql
+-- Transaction: all-or-nothing
 BEGIN;                                  -- or START TRANSACTION in MySQL
 UPDATE account SET balance = balance - 100 WHERE account_id = 1;
 UPDATE account SET balance = balance + 100 WHERE account_id = 2;
-COMMIT;                                 -- or ROLLBACK to undo everything
+COMMIT;                    -- Both succeed together
+-- Or: ROLLBACK; (undo all changes)
 ```
 
 `SAVEPOINT` marks a point inside a transaction that you can roll back to without losing the earlier work:
@@ -171,7 +173,7 @@ The CAP theorem applies when a network partition splits the nodes. During a part
 
 CAP is often misquoted as "pick any two of three, always." It describes behaviour during a partition only. PACELC extends it: when there is no partition, the system still trades latency against consistency. A single-node relational database avoids the distributed trade-off, which is why it can offer full ACID transactions.
 
-### Isolation levels and anomalies
+### Isolation levels and anomalies 
 
 Concurrent transactions can cause these anomalies:
 
@@ -200,6 +202,15 @@ The diagram shows a lost update. Both transactions read 100, and the second writ
 | Read Committed | No | Possible | Possible |
 | Repeatable Read | No | No | Possible in the SQL standard |
 | Serializable | No | No | No |
+
+```sql
+-- Isolation levels (trade consistency vs performance)
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+-- READ UNCOMMITTED: dirty reads (see uncommitted data)
+-- READ COMMITTED: no dirty reads (see committed data only)
+-- REPEATABLE READ: no non-repeatable reads (consistent within transaction)
+-- SERIALIZABLE: full isolation (safest, slowest)
+```
 
 Implementations differ, so check your database's documentation as well as the standard. PostgreSQL treats Read Uncommitted as Read Committed, and its Repeatable Read is snapshot-based, so it does not allow phantoms. MySQL InnoDB's default level is Repeatable Read.
 
