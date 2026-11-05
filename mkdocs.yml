@@ -240,6 +240,21 @@ nav:
     - 'Alternative Protocols: GraphQL, gRPC, and WebSockets': learning/21-api-design/alternative-protocols.md
     - API Security: learning/21-api-design/api-security.md
     - Documenting APIs with OpenAPI and springdoc: learning/21-api-design/openapi-documentation.md
+  - AI and Machine Learning:
+    - Overview: learning/ai-machine-learning/index.md
+    - 'AI and Machine Learning: History and Milestones': learning/ai-machine-learning/history-and-milestones.md
+    - Machine Learning Fundamentals: learning/ai-machine-learning/ml-fundamentals.md
+    - ML Fundamentals: learning/ai-machine-learning/fundamentals.md
+    - Machine Learning Algorithms: learning/ai-machine-learning/ml-algorithms.md
+    - ML Algorithms: learning/ai-machine-learning/algorithms.md
+    - Deep Learning: learning/ai-machine-learning/deep-learning1.md
+    - Deep Learning: learning/ai-machine-learning/deep-learning2.md
+    - LLMs and Transformers: learning/ai-machine-learning/llms-and-transformers.md
+    - LLMs & Transformers: learning/ai-machine-learning/llms-transformers.md
+    - RAG and Generative AI: learning/ai-machine-learning/rag-and-generative-ai.md
+    - RAG & Generative AI: learning/ai-machine-learning/rag-generative.md
+    - AI in Java: learning/ai-machine-learning/ai-in-java.md
+    - AI & Java Integration: learning/ai-machine-learning/ai-java.md
   - AI Integration:
     - Overview: learning/22-ai-integration/index.md
     - LLM Integration: learning/22-ai-integration/llm-integration.md
@@ -250,15 +265,6 @@ nav:
     - Search and Analytics: learning/23-specialisations/search-analytics.md
     - Advanced Patterns: learning/23-specialisations/advanced-patterns.md
     - Machine Learning for Backend Engineers: learning/23-specialisations/ml-for-backend-engineers.md
-  - AI and Machine Learning:
-    - Overview: learning/ai-machine-learning/index.md
-    - AI in Java: learning/ai-machine-learning/ai-in-java.md
-    - Deep Learning: learning/ai-machine-learning/deep-learning.md
-    - LLMs and Transformers: learning/ai-machine-learning/llms-and-transformers.md
-    - Machine Learning Algorithms: learning/ai-machine-learning/ml-algorithms.md
-    - Machine Learning Fundamentals: learning/ai-machine-learning/ml-fundamentals.md
-    - RAG and Generative AI: learning/ai-machine-learning/rag-and-generative-ai.md
-    - 'AI and Machine Learning: History and Milestones': learning/ai-machine-learning/history-and-milestones.md
   - Design Patterns:
     - Overview: learning/design-patterns/index.md
     - Behavioural Design Patterns: learning/design-patterns/behavioural-patterns.md
